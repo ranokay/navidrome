@@ -67,10 +67,10 @@ const Player = () => {
   const dataProvider = useDataProvider()
   const playerState = useSelector((state) => state.player)
   const dispatch = useDispatch()
-  const [currentTrackId, setCurrentTrackId] = useState(null)
+  const [reportedTrackId, setReportedTrackId] = useState(null)
   const [heartbeatTrackId, setHeartbeatTrackId] = useState(null)
   const lastPositionMsRef = useRef(0)
-  const currentTrackIdRef = useRef(null)
+  const reportedTrackIdRef = useRef(null)
   const stoppedRef = useRef(false)
   const [audioInstance, setAudioInstance] = useState(null)
   const isDesktop = useMediaQuery('(min-width:810px)')
@@ -86,7 +86,7 @@ const Player = () => {
   const playerStateRef = useRef(playerState)
   playerStateRef.current = playerState
 
-  currentTrackIdRef.current = currentTrackId
+  reportedTrackIdRef.current = reportedTrackId
 
   useInterval(
     () => {
@@ -282,11 +282,11 @@ const Player = () => {
     }
 
     const handlePageHide = () => {
-      if (currentTrackIdRef.current && !playerState.current?.isRadio) {
+      if (reportedTrackIdRef.current && !playerState.current?.isRadio) {
         stoppedRef.current = true
         try {
           subsonic.reportPlaybackKeepalive(
-            currentTrackIdRef.current,
+            reportedTrackIdRef.current,
             lastPositionMsRef.current,
             'stopped',
           )
@@ -472,14 +472,14 @@ const Player = () => {
 
   const onAudioSeeked = useCallback(
     (info) => {
-      if (!info.isRadio && currentTrackId) {
+      if (!info.isRadio && reportedTrackId) {
         const posMs = Math.floor(info.currentTime * 1000)
         lastPositionMsRef.current = posMs
         const state = audioInstance?.paused ? 'paused' : 'playing'
-        subsonic.reportPlayback(currentTrackId, posMs, state)
+        subsonic.reportPlayback(reportedTrackId, posMs, state)
       }
     },
-    [currentTrackId, audioInstance],
+    [reportedTrackId, audioInstance],
   )
 
   const onAudioVolumeChange = useCallback(
@@ -501,14 +501,14 @@ const Player = () => {
         if (!info.isRadio) {
           const posMs = Math.floor(info.currentTime * 1000)
           lastPositionMsRef.current = posMs
-          const isNewTrack = info.trackId !== currentTrackId
+          const isNewTrack = info.trackId !== reportedTrackId
           if (isNewTrack) {
             subsonic
               .reportPlayback(info.trackId, posMs, 'starting')
               .then(() =>
                 subsonic.reportPlayback(info.trackId, posMs, 'playing'),
               )
-            setCurrentTrackId(info.trackId)
+            setReportedTrackId(info.trackId)
           } else {
             subsonic.reportPlayback(info.trackId, posMs, 'playing')
           }
@@ -530,49 +530,49 @@ const Player = () => {
         }
       }
     },
-    [context, dispatch, showNotifications, currentTrackId],
+    [context, dispatch, showNotifications, reportedTrackId],
   )
 
   const onAudioPlayTrackChange = useCallback(() => {
-    if (currentTrackId) {
+    if (reportedTrackId) {
       subsonic.reportPlayback(
-        currentTrackId,
+        reportedTrackId,
         lastPositionMsRef.current,
         'stopped',
       )
     }
     setHeartbeatTrackId(null)
-    setCurrentTrackId(null)
-  }, [currentTrackId])
+    setReportedTrackId(null)
+  }, [reportedTrackId])
 
   const onAudioPause = useCallback(
     (info) => {
       dispatch(currentPlaying(info))
-      if (!info.isRadio && currentTrackId) {
+      if (!info.isRadio && reportedTrackId) {
         const posMs = Math.floor(info.currentTime * 1000)
         lastPositionMsRef.current = posMs
-        subsonic.reportPlayback(currentTrackId, posMs, 'paused')
+        subsonic.reportPlayback(reportedTrackId, posMs, 'paused')
       }
       setHeartbeatTrackId(null)
     },
-    [dispatch, currentTrackId],
+    [dispatch, reportedTrackId],
   )
 
   const onAudioEnded = useCallback(
     (currentPlayId, audioLists, info) => {
-      if (currentTrackId && !info.isRadio) {
+      if (reportedTrackId && !info.isRadio) {
         const posMs = Math.floor((info.duration || 0) * 1000)
-        subsonic.reportPlayback(currentTrackId, posMs, 'stopped')
+        subsonic.reportPlayback(reportedTrackId, posMs, 'stopped')
       }
       setHeartbeatTrackId(null)
-      setCurrentTrackId(null)
+      setReportedTrackId(null)
       dispatch(currentPlaying(info))
       dataProvider
         .getOne('keepalive', { id: info.trackId })
         // eslint-disable-next-line no-console
         .catch((e) => console.log('Keepalive error:', e))
     },
-    [dispatch, dataProvider, currentTrackId],
+    [dispatch, dataProvider, reportedTrackId],
   )
 
   const onCoverClick = useCallback((mode, audioLists, audioInfo) => {
@@ -608,19 +608,19 @@ const Player = () => {
 
   const onBeforeDestroy = useCallback(() => {
     return new Promise((resolve, reject) => {
-      if (currentTrackId && !playerStateRef.current?.current?.isRadio) {
+      if (reportedTrackId && !playerStateRef.current?.current?.isRadio) {
         subsonic.reportPlayback(
-          currentTrackId,
+          reportedTrackId,
           lastPositionMsRef.current,
           'stopped',
         )
       }
       setHeartbeatTrackId(null)
-      setCurrentTrackId(null)
+      setReportedTrackId(null)
       dispatch(clearQueue())
       reject()
     })
-  }, [dispatch, currentTrackId])
+  }, [dispatch, reportedTrackId])
 
   if (!visible) {
     document.title = 'Navidrome'
