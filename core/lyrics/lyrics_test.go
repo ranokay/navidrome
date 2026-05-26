@@ -12,7 +12,6 @@ import (
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/tests"
 	"github.com/navidrome/navidrome/utils"
-	"github.com/navidrome/navidrome/utils/gg"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -32,15 +31,15 @@ var _ = Describe("sources", func() {
 			Lang:          "eng",
 			Line: []model.Line{
 				{
-					Start: gg.P(int64(18800)),
+					Start: new(int64(18800)),
 					Value: "We're no strangers to love",
 				},
 				{
-					Start: gg.P(int64(22801)),
+					Start: new(int64(22801)),
 					Value: "You know the rules and so do I",
 				},
 			},
-			Offset: gg.P(int64(-100)),
+			Offset: new(int64(-100)),
 			Synced: true,
 		},
 	}
@@ -52,20 +51,20 @@ var _ = Describe("sources", func() {
 			Lang:          "eng",
 			Line: []model.Line{
 				{
-					Start: gg.P(int64(1000)),
-					End:   gg.P(int64(3000)),
+					Start: ptr(int64(1000)),
+					End:   ptr(int64(3000)),
 					Value: "Lead words",
 					Cue: []model.Cue{
 						{
-							Start:     gg.P(int64(1000)),
-							End:       gg.P(int64(1500)),
+							Start:     ptr(int64(1000)),
+							End:       ptr(int64(1500)),
 							Value:     "Lead ",
 							ByteStart: 0,
 							ByteEnd:   4,
 						},
 						{
-							Start:     gg.P(int64(1500)),
-							End:       gg.P(int64(3000)),
+							Start:     ptr(int64(1500)),
+							End:       ptr(int64(3000)),
 							Value:     "words",
 							ByteStart: 5,
 							ByteEnd:   9,
@@ -73,7 +72,7 @@ var _ = Describe("sources", func() {
 					},
 				},
 				{
-					Start: gg.P(int64(3000)),
+					Start: ptr(int64(3000)),
 					Value: "Fallback line",
 				},
 			},
@@ -87,11 +86,11 @@ var _ = Describe("sources", func() {
 			Lang: "eng",
 			Line: []model.Line{
 				{
-					Start: gg.P(int64(18800)),
+					Start: ptr(int64(18800)),
 					Value: "We're no strangers to love",
 				},
 				{
-					Start: gg.P(int64(22800)),
+					Start: ptr(int64(22800)),
 					Value: "You know the rules and so do I",
 				},
 			},
@@ -102,7 +101,7 @@ var _ = Describe("sources", func() {
 			Lang: "por",
 			Line: []model.Line{
 				{
-					Start: gg.P(int64(18800)),
+					Start: ptr(int64(18800)),
 					Value: "Nao somos estranhos ao amor",
 				},
 			},
@@ -130,13 +129,13 @@ var _ = Describe("sources", func() {
 			Lang: "xxx",
 			Line: []model.Line{
 				{
-					Start: gg.P(int64(18800)),
-					End:   gg.P(int64(22800)),
+					Start: ptr(int64(18800)),
+					End:   ptr(int64(22800)),
 					Value: "We're from subtitles",
 				},
 				{
-					Start: gg.P(int64(22801)),
-					End:   gg.P(int64(26000)),
+					Start: ptr(int64(22801)),
+					End:   ptr(int64(26000)),
 					Value: "Another subtitle line",
 				},
 			},

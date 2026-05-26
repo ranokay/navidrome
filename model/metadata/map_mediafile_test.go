@@ -9,7 +9,6 @@ import (
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/model/metadata"
 	"github.com/navidrome/navidrome/tests"
-	. "github.com/navidrome/navidrome/utils/gg"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -109,8 +108,8 @@ var _ = Describe("ToMediaFile", func() {
 
 			expected := model.LyricList{
 				{Lang: "eng", Line: []model.Line{
-					{Value: "This is", Start: P(int64(0))},
-					{Value: "English SYLT", Start: P(int64(2500))},
+					{Value: "This is", Start: new(int64(0))},
+					{Value: "English SYLT", Start: new(int64(2500))},
 				}, Synced: true},
 				{Lang: "xxx", Line: []model.Line{{Value: "Lyrics"}}, Synced: false},
 			}
@@ -137,7 +136,7 @@ var _ = Describe("ToMediaFile", func() {
 				{
 					Kind:   "main",
 					Lang:   "eng",
-					Line:   []model.Line{{Start: P(int64(1000)), End: P(int64(2500)), Value: "Embedded TTML line"}},
+					Line:   []model.Line{{Start: ptr(int64(1000)), End: ptr(int64(2500)), Value: "Embedded TTML line"}},
 					Synced: true,
 				},
 			}))
@@ -175,7 +174,7 @@ var _ = Describe("ToMediaFile", func() {
 			Expect(actual[0].Kind).To(Equal("main"))
 			Expect(actual[0].Lang).To(Equal("en"))
 			Expect(actual[0].Line).To(Equal([]model.Line{
-				{Start: P(int64(1000)), End: P(int64(2500)), Value: "Long embedded TTML line"},
+				{Start: ptr(int64(1000)), End: ptr(int64(2500)), Value: "Long embedded TTML line"},
 			}))
 		})
 
@@ -193,7 +192,7 @@ Estamos nas legendas`},
 				{
 					Lang: "por",
 					Line: []model.Line{
-						{Start: P(int64(18800)), End: P(int64(22800)), Value: "Estamos nas legendas"},
+						{Start: ptr(int64(18800)), End: ptr(int64(22800)), Value: "Estamos nas legendas"},
 					},
 					Synced: true,
 				},
