@@ -52,20 +52,20 @@ var _ = Describe("sources", func() {
 			Lang:          "eng",
 			Line: []model.Line{
 				{
-					Start: ptr(int64(1000)),
-					End:   ptr(int64(3000)),
+					Start: new(int64(1000)),
+					End:   new(int64(3000)),
 					Value: "Lead words",
 					Cue: []model.Cue{
 						{
-							Start:     ptr(int64(1000)),
-							End:       ptr(int64(1500)),
+							Start:     new(int64(1000)),
+							End:       new(int64(1500)),
 							Value:     "Lead ",
 							ByteStart: 0,
 							ByteEnd:   4,
 						},
 						{
-							Start:     ptr(int64(1500)),
-							End:       ptr(int64(3000)),
+							Start:     new(int64(1500)),
+							End:       new(int64(3000)),
 							Value:     "words",
 							ByteStart: 5,
 							ByteEnd:   9,
@@ -73,7 +73,7 @@ var _ = Describe("sources", func() {
 					},
 				},
 				{
-					Start: ptr(int64(3000)),
+					Start: new(int64(3000)),
 					Value: "Fallback line",
 				},
 			},
@@ -87,11 +87,11 @@ var _ = Describe("sources", func() {
 			Lang: "eng",
 			Line: []model.Line{
 				{
-					Start: ptr(int64(18800)),
+					Start: new(int64(18800)),
 					Value: "We're no strangers to love",
 				},
 				{
-					Start: ptr(int64(22800)),
+					Start: new(int64(22800)),
 					Value: "You know the rules and so do I",
 				},
 			},
@@ -102,7 +102,7 @@ var _ = Describe("sources", func() {
 			Lang: "por",
 			Line: []model.Line{
 				{
-					Start: ptr(int64(18800)),
+					Start: new(int64(18800)),
 					Value: "Nao somos estranhos ao amor",
 				},
 			},
@@ -130,13 +130,13 @@ var _ = Describe("sources", func() {
 			Lang: "xxx",
 			Line: []model.Line{
 				{
-					Start: ptr(int64(18800)),
-					End:   ptr(int64(22800)),
+					Start: new(int64(18800)),
+					End:   new(int64(22800)),
 					Value: "We're from subtitles",
 				},
 				{
-					Start: ptr(int64(22801)),
-					End:   ptr(int64(26000)),
+					Start: new(int64(22801)),
+					End:   new(int64(26000)),
 					Value: "Another subtitle line",
 				},
 			},
@@ -176,10 +176,8 @@ var _ = Describe("sources", func() {
 		Expect(err).To(BeNil())
 
 		svc := lyrics.NewLyrics(nil)
-		batchSvc, ok := svc.(lyrics.BatchLyrics)
-		Expect(ok).To(BeTrue())
 
-		list, err := batchSvc.GetLyricsForMediaFiles(ctx, []model.MediaFile{
+		list, err := svc.GetLyricsForMediaFiles(ctx, []model.MediaFile{
 			{
 				Lyrics: string(embeddedJSON),
 				Path:   "tests/fixtures/01 Invisible (RED) Edit Version.mp3",
@@ -220,7 +218,7 @@ var _ = Describe("sources", func() {
 		Expect(err).To(BeNil())
 		Expect(list).To(HaveLen(1))
 		Expect(list[0].Line).To(Equal([]model.Line{
-			{Start: ptr(int64(1000)), Value: "Upper suffix"},
+			{Start: new(int64(1000)), Value: "Upper suffix"},
 		}))
 	})
 
@@ -244,7 +242,7 @@ var _ = Describe("sources", func() {
 		Expect(err).To(BeNil())
 		Expect(list).To(HaveLen(1))
 		Expect(list[0].Line).To(Equal([]model.Line{
-			{Start: ptr(int64(1000)), Value: "Fallback line"},
+			{Start: new(int64(1000)), Value: "Fallback line"},
 		}))
 	})
 
@@ -372,7 +370,7 @@ func (m *mockPluginLoader) PluginNames(_ string) []string {
 	return []string{"test-lyrics-plugin"}
 }
 
-func (m *mockPluginLoader) LoadLyricsProvider(name string) (lyrics.Lyrics, bool) {
+func (m *mockPluginLoader) LoadLyricsProvider(name string) (lyrics.Provider, bool) {
 	if m.notFound {
 		return nil, false
 	}

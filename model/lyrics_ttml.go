@@ -1,4 +1,4 @@
-package lyrics
+package model
 
 import (
 	"bytes"
@@ -13,7 +13,7 @@ import (
 	"unicode"
 
 	"github.com/navidrome/navidrome/log"
-	"github.com/navidrome/navidrome/model"
+	"github.com/navidrome/navidrome/utils/gg"
 	"github.com/navidrome/navidrome/utils/str"
 )
 
@@ -22,10 +22,7 @@ const (
 	defaultTTMLSubFrameRate = 1.0
 	defaultTTMLTickRate     = 1.0
 
-	ttmlLyricKindMain          = "main"
-	ttmlLyricKindTranslation   = "translation"
-	ttmlLyricKindPronunciation = "pronunciation"
-	ttmlBackgroundAgentPrefix  = "__nd_bg__|"
+	ttmlBackgroundAgentPrefix = "__nd_bg__|"
 )
 
 var offsetTimeRegex = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)(h|m|s|ms|f|t)$`)
@@ -58,19 +55,19 @@ type ttmlTimingContext struct {
 
 type ttmlLineRef struct {
 	order int
-	line  model.Line
+	line  Line
 }
 
 type ttmlMetadataEntry struct {
 	key  string
-	line model.Line
+	line Line
 	seq  int
 }
 
 type ttmlResolvedMetadataLine struct {
 	order int
 	seq   int
-	line  model.Line
+	line  Line
 }
 
 type ttmlDefinedAgent struct {
@@ -81,7 +78,7 @@ type ttmlDefinedAgent struct {
 
 type ttmlPiece struct {
 	raw string
-	cue *model.Cue
+	cue *Cue
 }
 
 type ttmlParser struct {
@@ -89,7 +86,7 @@ type ttmlParser struct {
 	params  ttmlTimingParams
 
 	mainLangOrder   []string
-	mainLinesByLang map[string][]model.Line
+	mainLinesByLang map[string][]Line
 
 	mainLineRefsByKey map[string]ttmlLineRef
 	mainLineOrder     int
@@ -105,11 +102,11 @@ type ttmlParser struct {
 	metadataSeq int
 }
 
-func parseTTML(contents []byte) (model.LyricList, error) {
+func ParseTTML(contents []byte) (LyricList, error) {
 	return parseTTMLWithDefaultLang(contents, "xxx")
 }
 
-func parseTTMLWithDefaultLang(contents []byte, defaultLang string) (model.LyricList, error) {
+func parseTTMLWithDefaultLang(contents []byte, defaultLang string) (LyricList, error) {
 	contents = xmlEncodingRegex.ReplaceAll(contents, []byte(`<?xml$1encoding="UTF-8"$2?>`))
 
 	p := ttmlParser{
@@ -119,14 +116,14 @@ func parseTTMLWithDefaultLang(contents []byte, defaultLang string) (model.LyricL
 			subFrameRate: defaultTTMLSubFrameRate,
 			tickRate:     defaultTTMLTickRate,
 		},
-		mainLinesByLang:          make(map[string][]model.Line),
+		mainLinesByLang:          make(map[string][]Line),
 		mainLineRefsByKey:        make(map[string]ttmlLineRef),
 		translationEntriesByLg:   make(map[string][]ttmlMetadataEntry),
 		pronunciationEntriesByLg: make(map[string][]ttmlMetadataEntry),
 		definedAgents:            make(map[string]ttmlDefinedAgent),
 	}
 
-	root := ttmlTimingContext{lang: normalizeTTMLLang(defaultLang)}
+	root := ttmlTimingContext{lang: normalizeLyricLang(defaultLang)}
 
 	for {
 		token, err := p.decoder.Token()
@@ -158,9 +155,9 @@ func (p *ttmlParser) parseElement(start xml.StartElement, parent ttmlTimingConte
 
 	switch local {
 	case "translation":
-		return p.parseMetadataTrack(start, parent, ttmlLyricKindTranslation)
+		return p.parseMetadataTrack(start, parent, LyricKindTranslation)
 	case "transliteration":
-		return p.parseMetadataTrack(start, parent, ttmlLyricKindPronunciation)
+		return p.parseMetadataTrack(start, parent, LyricKindPronunciation)
 	case "agent":
 		return p.parseAgentDefinition(start)
 	}
@@ -175,7 +172,7 @@ func (p *ttmlParser) parseElement(start xml.StartElement, parent ttmlTimingConte
 			return nil
 		}
 
-		parsedLine := model.Line{Value: lineText}
+		parsedLine := Line{Value: lineText}
 		if ctx.hasBegin {
 			startMs := ctx.begin
 			parsedLine.Start = &startMs
@@ -187,7 +184,7 @@ func (p *ttmlParser) parseElement(start xml.StartElement, parent ttmlTimingConte
 		if len(tokens) > 0 {
 			parsedLine.Cue = tokens
 		}
-		parsedLine = hydrateLineTimingFromTokens(parsedLine)
+		parsedLine = NormalizeLineTiming(parsedLine)
 
 		lineKey, _ := attrValue(start.Attr, "key")
 		p.addMainLine(ctx.lang, lineKey, parsedLine)
@@ -221,7 +218,7 @@ func (p *ttmlParser) parseElement(start xml.StartElement, parent ttmlTimingConte
 
 func (p *ttmlParser) parseMetadataTrack(start xml.StartElement, parent ttmlTimingContext, kind string) error {
 	ctx := p.childContext(start.Attr, parent)
-	lang := normalizeTTMLLang(ctx.lang)
+	lang := normalizeLyricLang(ctx.lang)
 
 	for {
 		token, err := p.decoder.Token()
@@ -318,7 +315,7 @@ func (p *ttmlParser) parseMetadataText(start xml.StartElement, parent ttmlTiming
 	}
 
 	value, tokens := buildTTMLLineFromPieces(pieces)
-	line := model.Line{Value: value}
+	line := Line{Value: value}
 	if ctx.hasBegin {
 		startMs := ctx.begin
 		line.Start = &startMs
@@ -330,7 +327,7 @@ func (p *ttmlParser) parseMetadataText(start xml.StartElement, parent ttmlTiming
 	if len(tokens) > 0 {
 		line.Cue = tokens
 	}
-	line = hydrateLineTimingFromTokens(line)
+	line = NormalizeLineTiming(line)
 
 	if line.Value == "" && len(line.Cue) == 0 {
 		return ttmlMetadataEntry{}, false, nil
@@ -339,7 +336,7 @@ func (p *ttmlParser) parseMetadataText(start xml.StartElement, parent ttmlTiming
 	return ttmlMetadataEntry{key: forKey, line: line}, true, nil
 }
 
-func (p *ttmlParser) parseParagraph(parent ttmlTimingContext) (string, []model.Cue, error) {
+func (p *ttmlParser) parseParagraph(parent ttmlTimingContext) (string, []Cue, error) {
 	var pieces []ttmlPiece
 
 	for {
@@ -402,7 +399,7 @@ func (p *ttmlParser) parseInlineElement(start xml.StartElement, parent ttmlTimin
 				rawValue := concatTTMLPieceRaw(pieces)
 				tokenText := sanitizeTTMLText(rawValue)
 				if tokenText != "" {
-					parsedToken := model.Cue{
+					parsedToken := Cue{
 						AgentID: p.resolveCueAgentID(ctx),
 					}
 					if ctx.hasBegin {
@@ -428,7 +425,7 @@ func (p *ttmlParser) parseInlineElement(start xml.StartElement, parent ttmlTimin
 	}
 }
 
-func buildTTMLLineFromPieces(pieces []ttmlPiece) (string, []model.Cue) {
+func buildTTMLLineFromPieces(pieces []ttmlPiece) (string, []Cue) {
 	finalized := finalizeTTMLLines(splitTTMLPiecesByNewline(pieces))
 	for len(finalized) > 0 && finalized[0].text == "" && len(finalized[0].cues) == 0 {
 		finalized = finalized[1:]
@@ -442,7 +439,7 @@ func buildTTMLLineFromPieces(pieces []ttmlPiece) (string, []model.Cue) {
 	}
 
 	var value strings.Builder
-	cues := make([]model.Cue, 0, 8)
+	cues := make([]Cue, 0, 8)
 	byteOffset := 0
 	for i, line := range finalized {
 		if i > 0 {
@@ -463,7 +460,7 @@ func buildTTMLLineFromPieces(pieces []ttmlPiece) (string, []model.Cue) {
 
 type ttmlFinalLine struct {
 	text string
-	cues []model.Cue
+	cues []Cue
 }
 
 func finalizeTTMLLines(lines [][]ttmlPiece) []ttmlFinalLine {
@@ -491,7 +488,7 @@ func splitTTMLPiecesByNewline(pieces []ttmlPiece) [][]ttmlPiece {
 			if start < i {
 				lines[len(lines)-1] = append(lines[len(lines)-1], ttmlPiece{
 					raw: raw[start:i],
-					cue: cloneTTMLCue(piece.cue),
+					cue: gg.Clone(piece.cue),
 				})
 			}
 			lines = append(lines, []ttmlPiece{})
@@ -500,14 +497,14 @@ func splitTTMLPiecesByNewline(pieces []ttmlPiece) [][]ttmlPiece {
 		if start < len(raw) {
 			lines[len(lines)-1] = append(lines[len(lines)-1], ttmlPiece{
 				raw: raw[start:],
-				cue: cloneTTMLCue(piece.cue),
+				cue: gg.Clone(piece.cue),
 			})
 		}
 	}
 	return lines
 }
 
-func finalizeTTMLLogicalLine(line []ttmlPiece) (string, []model.Cue) {
+func finalizeTTMLLogicalLine(line []ttmlPiece) (string, []Cue) {
 	rawLine := concatTTMLPieceRaw(line)
 	if rawLine == "" {
 		return "", nil
@@ -521,7 +518,7 @@ func finalizeTTMLLogicalLine(line []ttmlPiece) (string, []model.Cue) {
 	}
 
 	trimmed := strings.TrimSpace(rawLine)
-	cues := make([]model.Cue, 0, len(line))
+	cues := make([]Cue, 0, len(line))
 	cursor := 0
 	for _, piece := range line {
 		pieceEnd := cursor + len(piece.raw)
@@ -566,37 +563,28 @@ func ttmlPiecesContainCue(pieces []ttmlPiece) bool {
 	return false
 }
 
-func cloneTTMLCue(cue *model.Cue) *model.Cue {
-	if cue == nil {
-		return nil
-	}
-
-	cloned := *cue
-	return &cloned
-}
-
-func (p *ttmlParser) toLyricList() model.LyricList {
-	res := make(model.LyricList, 0, len(p.mainLangOrder)+len(p.translationLangOrder)+len(p.pronunciationLangOrder))
+func (p *ttmlParser) toLyricList() LyricList {
+	res := make(LyricList, 0, len(p.mainLangOrder)+len(p.translationLangOrder)+len(p.pronunciationLangOrder))
 	for _, lang := range p.mainLangOrder {
 		lines := p.mainLinesByLang[lang]
 		if len(lines) == 0 {
 			continue
 		}
-		res = append(res, p.finalizeLyrics(model.Lyrics{
-			Kind:   ttmlLyricKindMain,
+		res = append(res, p.finalizeLyrics(Lyrics{
+			Kind:   LyricKindMain,
 			Lang:   lang,
 			Line:   lines,
 			Synced: linesAreSynced(lines),
 		}))
 	}
 
-	res = append(res, p.buildMetadataLyrics(ttmlLyricKindTranslation, p.translationLangOrder, p.translationEntriesByLg)...)
-	res = append(res, p.buildMetadataLyrics(ttmlLyricKindPronunciation, p.pronunciationLangOrder, p.pronunciationEntriesByLg)...)
+	res = append(res, p.buildMetadataLyrics(LyricKindTranslation, p.translationLangOrder, p.translationEntriesByLg)...)
+	res = append(res, p.buildMetadataLyrics(LyricKindPronunciation, p.pronunciationLangOrder, p.pronunciationEntriesByLg)...)
 	return res
 }
 
-func (p *ttmlParser) buildMetadataLyrics(kind string, langOrder []string, entriesByLang map[string][]ttmlMetadataEntry) model.LyricList {
-	res := make(model.LyricList, 0, len(langOrder))
+func (p *ttmlParser) buildMetadataLyrics(kind string, langOrder []string, entriesByLang map[string][]ttmlMetadataEntry) LyricList {
+	res := make(LyricList, 0, len(langOrder))
 
 	for _, lang := range langOrder {
 		entries := entriesByLang[lang]
@@ -627,7 +615,7 @@ func (p *ttmlParser) buildMetadataLyrics(kind string, langOrder []string, entrie
 				endMs := *ref.line.End
 				line.End = &endMs
 			}
-			line = hydrateLineTimingFromTokens(line)
+			line = NormalizeLineTiming(line)
 
 			if line.Value == "" && len(line.Cue) == 0 {
 				continue
@@ -651,12 +639,12 @@ func (p *ttmlParser) buildMetadataLyrics(kind string, langOrder []string, entrie
 			return resolved[i].seq < resolved[j].seq
 		})
 
-		lines := make([]model.Line, len(resolved))
+		lines := make([]Line, len(resolved))
 		for i := range resolved {
 			lines[i] = resolved[i].line
 		}
 
-		res = append(res, p.finalizeLyrics(model.Lyrics{
+		res = append(res, p.finalizeLyrics(Lyrics{
 			Kind:   kind,
 			Lang:   lang,
 			Line:   lines,
@@ -667,12 +655,12 @@ func (p *ttmlParser) buildMetadataLyrics(kind string, langOrder []string, entrie
 	return res
 }
 
-func (p *ttmlParser) finalizeLyrics(lyrics model.Lyrics) model.Lyrics {
+func (p *ttmlParser) finalizeLyrics(lyrics Lyrics) Lyrics {
 	lyrics.Line, lyrics.Agents = p.resolveAgents(lyrics.Line)
-	return model.NormalizeLyrics(lyrics)
+	return NormalizeLyrics(lyrics)
 }
 
-func (p *ttmlParser) resolveAgents(lines []model.Line) ([]model.Line, []model.Agent) {
+func (p *ttmlParser) resolveAgents(lines []Line) ([]Line, []Agent) {
 	if len(lines) == 0 {
 		return lines, nil
 	}
@@ -735,13 +723,13 @@ func (p *ttmlParser) resolveAgents(lines []model.Line) ([]model.Line, []model.Ag
 		}
 	}
 
-	agents := make([]model.Agent, 0, len(usedOrder))
+	agents := make([]Agent, 0, len(usedOrder))
 	for _, agentID := range usedOrder {
 		role := p.baseRoleForAgent(agentID)
 		if agentID == mainID {
 			role = "main"
 		}
-		agent := model.Agent{
+		agent := Agent{
 			ID:   agentID,
 			Role: role,
 			Name: p.agentNameForID(agentID),
@@ -808,8 +796,9 @@ func isBackgroundAgentID(agentID string) bool {
 }
 
 func contextHasRole(roles string, role string) bool {
+	lowerRole := strings.ToLower(role)
 	for _, candidate := range strings.Fields(strings.ToLower(roles)) {
-		if candidate == strings.ToLower(role) {
+		if candidate == lowerRole {
 			return true
 		}
 	}
@@ -830,8 +819,8 @@ func appendTTMLRoles(existing string, roles string) string {
 	return existing
 }
 
-func (p *ttmlParser) addMainLine(lang string, lineKey string, line model.Line) {
-	lang = normalizeTTMLLang(lang)
+func (p *ttmlParser) addMainLine(lang string, lineKey string, line Line) {
+	lang = normalizeLyricLang(lang)
 	if _, ok := p.mainLinesByLang[lang]; !ok {
 		p.mainLangOrder = append(p.mainLangOrder, lang)
 	}
@@ -850,17 +839,17 @@ func (p *ttmlParser) addMainLine(lang string, lineKey string, line model.Line) {
 }
 
 func (p *ttmlParser) addMetadataEntry(kind string, lang string, entry ttmlMetadataEntry) {
-	lang = normalizeTTMLLang(lang)
+	lang = normalizeLyricLang(lang)
 	entry.seq = p.metadataSeq
 	p.metadataSeq++
 
 	switch kind {
-	case ttmlLyricKindTranslation:
+	case LyricKindTranslation:
 		if _, ok := p.translationEntriesByLg[lang]; !ok {
 			p.translationLangOrder = append(p.translationLangOrder, lang)
 		}
 		p.translationEntriesByLg[lang] = append(p.translationEntriesByLg[lang], entry)
-	case ttmlLyricKindPronunciation:
+	case LyricKindPronunciation:
 		if _, ok := p.pronunciationEntriesByLg[lang]; !ok {
 			p.pronunciationLangOrder = append(p.pronunciationLangOrder, lang)
 		}
@@ -872,7 +861,7 @@ func (p *ttmlParser) childContext(attrs []xml.Attr, parent ttmlTimingContext) tt
 	ctx := parent
 
 	if lang, ok := attrValue(attrs, "lang"); ok {
-		ctx.lang = normalizeTTMLLang(lang)
+		ctx.lang = normalizeLyricLang(lang)
 	}
 	if agentID, ok := attrValue(attrs, "agent"); ok {
 		ctx.agentID = strings.TrimSpace(agentID)
@@ -982,9 +971,9 @@ func (p *ttmlParser) updateTimingParams(attrs []xml.Attr) {
 		}
 	}
 
-	p.params.frameRate = positiveOrDefault(frameRate, defaultTTMLFrameRate)
-	p.params.subFrameRate = positiveOrDefault(subFrameRate, defaultTTMLSubFrameRate)
-	p.params.tickRate = positiveOrDefault(tickRate, defaultTTMLTickRate)
+	p.params.frameRate = gg.If(frameRate > 0, frameRate, defaultTTMLFrameRate)
+	p.params.subFrameRate = gg.If(subFrameRate > 0, subFrameRate, defaultTTMLSubFrameRate)
+	p.params.tickRate = gg.If(tickRate > 0, tickRate, defaultTTMLTickRate)
 }
 
 func parseTTMLDurationExpression(expr string, params ttmlTimingParams) (int64, bool) {
@@ -1232,7 +1221,7 @@ func (p *ttmlParser) skipElement(_ xml.StartElement) error {
 	return nil
 }
 
-func normalizeTTMLLang(lang string) string {
+func normalizeLyricLang(lang string) string {
 	lang = strings.ToLower(strings.TrimSpace(lang))
 	if lang == "" {
 		return "xxx"
@@ -1252,7 +1241,7 @@ func sanitizeTTMLText(raw string) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
-func linesAreSynced(lines []model.Line) bool {
+func linesAreSynced(lines []Line) bool {
 	for i := range lines {
 		if lines[i].Start != nil {
 			return true
@@ -1264,15 +1253,4 @@ func linesAreSynced(lines []model.Line) bool {
 		}
 	}
 	return false
-}
-
-func hydrateLineTimingFromTokens(line model.Line) model.Line {
-	return model.NormalizeLineTiming(line)
-}
-
-func positiveOrDefault(v float64, fallback float64) float64 {
-	if v <= 0 {
-		return fallback
-	}
-	return v
 }

@@ -2,6 +2,7 @@ package model
 
 import (
 	"cmp"
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/navidrome/navidrome/log"
+	"github.com/navidrome/navidrome/utils/gg"
 	"github.com/navidrome/navidrome/utils/str"
 )
 
@@ -43,6 +45,23 @@ type Lyrics struct {
 	Line          []Line  `structs:"line"                    json:"line"`
 	Offset        *int64  `structs:"offset,omitempty"        json:"offset,omitempty"`
 	Synced        bool    `structs:"synced"                  json:"synced"`
+}
+
+// Lyric kinds, as defined by the OpenSubsonic songLyrics v2 contract. These are
+// the canonical wire values; keep them in sync with the spec.
+const (
+	LyricKindMain          = "main"
+	LyricKindTranslation   = "translation"
+	LyricKindPronunciation = "pronunciation"
+)
+
+// LyricKindOrMain returns kind, defaulting to LyricKindMain when empty. A blank
+// kind means an untyped (single-track) lyric, which the contract treats as main.
+func LyricKindOrMain(kind string) string {
+	if strings.TrimSpace(kind) == "" {
+		return LyricKindMain
+	}
+	return kind
 }
 
 // support the standard [mm:ss.mm], as well as [hh:*] and [*.mmm]
@@ -208,6 +227,33 @@ func ToLyrics(language, text string) (*Lyrics, error) {
 		Synced:        synced,
 	}
 	return &lyrics, nil
+}
+
+// ParseLyricsFile parses a sidecar lyrics file, dispatching on its extension to
+// the matching format parser. Unknown extensions fall back to the generic
+// LRC/plain-text parser. It is the single owner of the suffix→parser mapping,
+// mirroring [ParseEmbedded] for tag-embedded lyrics.
+func ParseLyricsFile(suffix string, contents []byte) (LyricList, error) {
+	var list LyricList
+	var err error
+	switch {
+	case strings.EqualFold(suffix, ".ttml"):
+		list, err = ParseTTML(contents)
+	case strings.EqualFold(suffix, ".srt"):
+		list, err = ParseSRT(contents)
+	case strings.EqualFold(suffix, ".yaml"), strings.EqualFold(suffix, ".yml"):
+		list, err = ParseLyricsfile(string(contents))
+	default:
+		var lyric *Lyrics
+		lyric, err = ToLyrics("xxx", string(contents))
+		if lyric != nil {
+			list = LyricList{*lyric}
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s lyrics: %w", strings.TrimPrefix(suffix, "."), err)
+	}
+	return list, nil
 }
 
 // parseEnhancedLine extracts word-level timing cues from Enhanced LRC inline markers
@@ -467,39 +513,46 @@ func normalizeCueLine(line Line, fallbackEnd *int64) Line {
 	if len(line.Cue) == 0 {
 		return line
 	}
-
-	for i := range line.Cue {
-		if line.Cue[i].End != nil {
-			continue
-		}
-
-		if i+1 < len(line.Cue) && line.Cue[i+1].Start != nil {
-			v := *line.Cue[i+1].Start
-			line.Cue[i].End = &v
-			continue
-		}
-
-		if fallbackEnd != nil {
-			v := *fallbackEnd
-			line.Cue[i].End = &v
-		}
-	}
-
-	for i := range line.Cue {
-		if line.Cue[i].End == nil {
-			line.Cue = clearCueEnds(line.Cue)
-			return NormalizeLineTiming(line)
-		}
-	}
-
+	line.Cue = NormalizeCueEnds(line.Cue, fallbackEnd)
 	return NormalizeLineTiming(line)
 }
 
-func clearCueEnds(cues []Cue) []Cue {
-	normalized := make([]Cue, len(cues))
-	copy(normalized, cues)
-	for i := range normalized {
-		normalized[i].End = nil
+// NormalizeCueEnds resolves missing cue end times within a single ordered cue
+// group: each end is filled from the next cue's start, then from fallbackEnd,
+// and is clamped so it never precedes the cue's own start nor overruns the next
+// cue. End times are all-or-none — if any cue still lacks an end afterwards, all
+// ends in the group are cleared. The input slice is never mutated.
+func NormalizeCueEnds(cues []Cue, fallbackEnd *int64) []Cue {
+	if len(cues) == 0 {
+		return cues
 	}
-	return normalized
+
+	out := slices.Clone(cues)
+	for i := range out {
+		end := out[i].End
+		if end == nil {
+			if i+1 < len(out) && out[i+1].Start != nil {
+				end = out[i+1].Start
+			} else {
+				end = fallbackEnd
+			}
+		}
+		if end != nil && i+1 < len(out) && out[i+1].Start != nil && *end > *out[i+1].Start {
+			end = out[i+1].Start
+		}
+		if end != nil && out[i].Start != nil && *end < *out[i].Start {
+			end = out[i].Start
+		}
+		out[i].End = gg.Clone(end)
+	}
+
+	for i := range out {
+		if out[i].End == nil {
+			for j := range out {
+				out[j].End = nil
+			}
+			break
+		}
+	}
+	return out
 }
