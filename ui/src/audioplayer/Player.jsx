@@ -23,6 +23,7 @@ import {
   refreshQueue,
   setPlayMode,
   setTranscodingProfile,
+  updateQueueLyric,
   setVolume,
   syncQueue,
 } from '../actions'
@@ -34,6 +35,30 @@ import { keyMap } from '../hotkeys'
 import keyHandlers from './keyHandlers'
 import { calculateGain } from '../utils/calculateReplayGain'
 import { detectBrowserProfile, decisionService } from '../transcode'
+import {
+  getPreferredLyricLanguage,
+  hasStructuredLyricContent,
+  selectLyricLayers,
+  structuredLyricToLrc,
+} from './lyrics'
+import {
+  resolveLyricsOverlayState,
+  togglePronunciationPreference,
+} from './lyricsOverlayState'
+import KaraokeLyricsOverlay from './KaraokeLyricsOverlay'
+import MobileKaraokeLyricsPortal from './MobileKaraokeLyricsPortal'
+
+const emptyLyricLayers = {
+  main: null,
+  translation: null,
+  pronunciation: null,
+}
+
+const normalizeLyricLayers = (layers) => ({
+  main: layers?.main || null,
+  translation: layers?.translation || null,
+  pronunciation: layers?.pronunciation || null,
+})
 
 const Player = () => {
   const theme = useCurrentTheme()
@@ -42,10 +67,10 @@ const Player = () => {
   const dataProvider = useDataProvider()
   const playerState = useSelector((state) => state.player)
   const dispatch = useDispatch()
-  const [currentTrackId, setCurrentTrackId] = useState(null)
+  const [reportedTrackId, setReportedTrackId] = useState(null)
   const [heartbeatTrackId, setHeartbeatTrackId] = useState(null)
   const lastPositionMsRef = useRef(0)
-  const currentTrackIdRef = useRef(null)
+  const reportedTrackIdRef = useRef(null)
   const stoppedRef = useRef(false)
   const [audioInstance, setAudioInstance] = useState(null)
   const isDesktop = useMediaQuery('(min-width:810px)')
@@ -61,7 +86,7 @@ const Player = () => {
   const playerStateRef = useRef(playerState)
   playerStateRef.current = playerState
 
-  currentTrackIdRef.current = currentTrackId
+  reportedTrackIdRef.current = reportedTrackId
 
   useInterval(
     () => {
@@ -138,6 +163,83 @@ const Player = () => {
   const gainInfo = useSelector((state) => state.replayGain)
   const [context, setContext] = useState(null)
   const [gainNode, setGainNode] = useState(null)
+  const lyricCacheRef = useRef(new Map())
+  const lyricRequestIdRef = useRef(0)
+  const playerRef = useRef(null)
+  const [karaokeVisiblePreference, setKaraokeVisiblePreference] =
+    useState(false)
+  const [selectedLyricLayers, setSelectedLyricLayers] =
+    useState(emptyLyricLayers)
+  const [translationPreference, setTranslationPreference] = useState(false)
+  const [pronunciationPreference, setPronunciationPreference] = useState(null)
+  const currentTrackId = playerState.current?.trackId
+  const currentTrackIsRadio = playerState.current?.isRadio
+  const selectedStructuredLyric = selectedLyricLayers.main
+  const hasKaraokeLyric = hasStructuredLyricContent(selectedStructuredLyric)
+  const hasTranslationLyric = hasStructuredLyricContent(
+    selectedLyricLayers.translation,
+  )
+  const hasPronunciationLyric = hasStructuredLyricContent(
+    selectedLyricLayers.pronunciation,
+  )
+  const { karaokeVisible, showTranslation, showPronunciation } =
+    resolveLyricsOverlayState({
+      karaokeVisiblePreference,
+      translationPreference,
+      pronunciationPreference,
+      hasKaraokeLyric,
+      hasTranslationLyric,
+      hasPronunciationLyric,
+    })
+  const useInlineMobileLyrics = karaokeVisible && !isDesktop
+
+  const applyLyricToRuntimePlayer = useCallback((trackId, lyric) => {
+    if (!trackId) {
+      return
+    }
+
+    const player = playerRef.current
+    if (!player || typeof player.setState !== 'function') {
+      return
+    }
+
+    player.setState((prevState) => {
+      const prevLists = Array.isArray(prevState.audioLists)
+        ? prevState.audioLists
+        : []
+      let changed = false
+      const audioLists = prevLists.map((item) => {
+        if (item.trackId !== trackId) {
+          return item
+        }
+        if (item.lyric === lyric) {
+          return item
+        }
+        changed = true
+        return {
+          ...item,
+          lyric,
+        }
+      })
+
+      const currentItem = audioLists.find(
+        (item) => item.musicSrc === prevState.musicSrc,
+      )
+      const currentLyric =
+        typeof currentItem?.lyric === 'string'
+          ? currentItem.lyric
+          : prevState.lyric
+
+      if (!changed && currentLyric === prevState.lyric) {
+        return null
+      }
+
+      return {
+        audioLists,
+        lyric: currentLyric,
+      }
+    })
+  }, [])
 
   useEffect(() => {
     if (
@@ -180,11 +282,11 @@ const Player = () => {
     }
 
     const handlePageHide = () => {
-      if (currentTrackIdRef.current && !playerState.current?.isRadio) {
+      if (reportedTrackIdRef.current && !playerState.current?.isRadio) {
         stoppedRef.current = true
         try {
           subsonic.reportPlaybackKeepalive(
-            currentTrackIdRef.current,
+            reportedTrackIdRef.current,
             lastPositionMsRef.current,
             'stopped',
           )
@@ -202,6 +304,88 @@ const Player = () => {
     }
   }, [playerState, audioInstance])
 
+  useEffect(() => {
+    if (!currentTrackId || currentTrackIsRadio) {
+      setSelectedLyricLayers(emptyLyricLayers)
+      return
+    }
+
+    const cached = lyricCacheRef.current.get(currentTrackId)
+    let layers = emptyLyricLayers
+    if (cached && typeof cached !== 'string') {
+      if (cached.layers) {
+        layers = normalizeLyricLayers(cached.layers)
+      } else if (cached.structuredLyric) {
+        layers = normalizeLyricLayers({
+          main: cached.structuredLyric,
+        })
+      }
+    }
+    setSelectedLyricLayers(layers)
+  }, [currentTrackId, currentTrackIsRadio])
+
+  useEffect(() => {
+    lyricRequestIdRef.current += 1
+    const requestId = lyricRequestIdRef.current
+
+    if (!currentTrackId || currentTrackIsRadio) {
+      return
+    }
+
+    const cached = lyricCacheRef.current.get(currentTrackId)
+    if (cached !== undefined) {
+      const cachedLyric =
+        typeof cached === 'string' ? cached : cached?.lrc || ''
+      const cachedLayers =
+        typeof cached === 'string'
+          ? emptyLyricLayers
+          : cached?.layers
+            ? normalizeLyricLayers(cached.layers)
+            : normalizeLyricLayers({ main: cached?.structuredLyric })
+
+      setSelectedLyricLayers(cachedLayers)
+      if (cachedLyric) {
+        dispatch(updateQueueLyric(currentTrackId, cachedLyric))
+        applyLyricToRuntimePlayer(currentTrackId, cachedLyric)
+      }
+      return
+    }
+
+    subsonic
+      .getLyricsBySongId(currentTrackId)
+      .then((resp) => {
+        if (lyricRequestIdRef.current !== requestId) {
+          return
+        }
+
+        const structuredLyrics =
+          resp?.json?.['subsonic-response']?.lyricsList?.structuredLyrics || []
+        const layers = selectLyricLayers(
+          structuredLyrics,
+          getPreferredLyricLanguage(),
+        )
+        const lyric = layers.main ? structuredLyricToLrc(layers.main) : ''
+        lyricCacheRef.current.set(currentTrackId, {
+          lrc: lyric,
+          layers,
+        })
+        setSelectedLyricLayers(layers)
+
+        if (lyric !== '') {
+          dispatch(updateQueueLyric(currentTrackId, lyric))
+          applyLyricToRuntimePlayer(currentTrackId, lyric)
+        }
+      })
+      .catch(() => {
+        if (lyricRequestIdRef.current !== requestId) {
+          return
+        }
+        setSelectedLyricLayers(emptyLyricLayers)
+        // Do not cache network/request failures as empty lyrics, so we can retry.
+        lyricCacheRef.current.delete(currentTrackId)
+      })
+  }, [dispatch, currentTrackId, currentTrackIsRadio, applyLyricToRuntimePlayer])
+
   const defaultOptions = useMemo(
     () => ({
       theme: playerTheme,
@@ -213,7 +397,7 @@ const Player = () => {
       clearPriorAudioLists: false,
       showDestroy: true,
       showDownload: false,
-      showLyric: true,
+      showLyric: false,
       showReload: false,
       toggleMode: !isDesktop,
       glassBg: false,
@@ -251,12 +435,26 @@ const Player = () => {
         (playerState.clear || playerState.playIndex === 0),
       clearPriorAudioLists: playerState.clear,
       extendsContent: (
-        <PlayerToolbar id={current.trackId} isRadio={current.isRadio} />
+        <PlayerToolbar
+          id={current.trackId}
+          isRadio={current.isRadio}
+          onToggleLyrics={() =>
+            setKaraokeVisiblePreference((visible) => !visible)
+          }
+          lyricsActive={karaokeVisible}
+          lyricsDisabled={!hasKaraokeLyric}
+        />
       ),
       defaultVolume: isMobilePlayer ? 1 : playerState.volume,
       showMediaSession: !current.isRadio,
     }
-  }, [playerState, defaultOptions, isMobilePlayer])
+  }, [
+    playerState,
+    defaultOptions,
+    isMobilePlayer,
+    karaokeVisible,
+    hasKaraokeLyric,
+  ])
 
   const onAudioListsChange = useCallback(
     (_, audioLists, audioInfo) => dispatch(syncQueue(audioInfo, audioLists)),
@@ -291,14 +489,14 @@ const Player = () => {
         if (!info.isRadio) {
           const posMs = Math.floor(info.currentTime * 1000)
           lastPositionMsRef.current = posMs
-          const isNewTrack = info.trackId !== currentTrackId
+          const isNewTrack = info.trackId !== reportedTrackId
           if (isNewTrack) {
             subsonic
               .reportPlayback(info.trackId, posMs, 'starting')
               .then(() =>
                 subsonic.reportPlayback(info.trackId, posMs, 'playing'),
               )
-            setCurrentTrackId(info.trackId)
+            setReportedTrackId(info.trackId)
           } else {
             subsonic.reportPlayback(info.trackId, posMs, 'playing')
           }
@@ -320,56 +518,59 @@ const Player = () => {
         }
       }
     },
-    [context, dispatch, showNotifications, currentTrackId],
+    [context, dispatch, showNotifications, reportedTrackId],
   )
 
   const onAudioPlayTrackChange = useCallback(() => {
-    if (currentTrackId) {
+    if (reportedTrackId) {
       subsonic.reportPlayback(
-        currentTrackId,
+        reportedTrackId,
         lastPositionMsRef.current,
         'stopped',
       )
     }
     setHeartbeatTrackId(null)
-    setCurrentTrackId(null)
-  }, [currentTrackId])
+    setReportedTrackId(null)
+  }, [reportedTrackId])
 
   const onAudioPause = useCallback(
     (info) => {
       dispatch(currentPlaying(info))
-      if (!info.isRadio && currentTrackId) {
+      if (!info.isRadio && reportedTrackId) {
         const posMs = Math.floor(info.currentTime * 1000)
         lastPositionMsRef.current = posMs
-        subsonic.reportPlayback(currentTrackId, posMs, 'paused')
+        subsonic.reportPlayback(reportedTrackId, posMs, 'paused')
       }
       setHeartbeatTrackId(null)
     },
-    [dispatch, currentTrackId],
+    [dispatch, reportedTrackId],
   )
 
   const onAudioEnded = useCallback(
     (currentPlayId, audioLists, info) => {
-      if (currentTrackId && !info.isRadio) {
+      if (reportedTrackId && !info.isRadio) {
         const posMs = Math.floor((info.duration || 0) * 1000)
-        subsonic.reportPlayback(currentTrackId, posMs, 'stopped')
+        subsonic.reportPlayback(reportedTrackId, posMs, 'stopped')
       }
       setHeartbeatTrackId(null)
-      setCurrentTrackId(null)
+      setReportedTrackId(null)
       dispatch(currentPlaying(info))
       dataProvider
         .getOne('keepalive', { id: info.trackId })
         // eslint-disable-next-line no-console
         .catch((e) => console.log('Keepalive error:', e))
     },
-    [dispatch, dataProvider, currentTrackId],
+    [dispatch, dataProvider, reportedTrackId],
   )
 
   const onCoverClick = useCallback((mode, audioLists, audioInfo) => {
+    if (!isDesktop && karaokeVisible) {
+      return
+    }
     if (mode === 'full' && audioInfo?.song?.albumId) {
       window.location.href = `#/album/${audioInfo.song.albumId}/show`
     }
-  }, [])
+  }, [isDesktop, karaokeVisible])
 
   const onAudioError = useCallback(
     (error, currentPlayId, audioLists, audioInfo) => {
@@ -395,19 +596,19 @@ const Player = () => {
 
   const onBeforeDestroy = useCallback(() => {
     return new Promise((resolve, reject) => {
-      if (currentTrackId && !playerStateRef.current?.current?.isRadio) {
+      if (reportedTrackId && !playerStateRef.current?.current?.isRadio) {
         subsonic.reportPlayback(
-          currentTrackId,
+          reportedTrackId,
           lastPositionMsRef.current,
           'stopped',
         )
       }
       setHeartbeatTrackId(null)
-      setCurrentTrackId(null)
+      setReportedTrackId(null)
       dispatch(clearQueue())
       reject()
     })
-  }, [dispatch, currentTrackId])
+  }, [dispatch, reportedTrackId])
 
   if (!visible) {
     document.title = 'Navidrome'
@@ -456,6 +657,7 @@ const Player = () => {
   return (
     <ThemeProvider theme={createMuiTheme(theme)}>
       <ReactJkMusicPlayer
+        ref={playerRef}
         {...options}
         className={classes.player}
         onAudioListsChange={onAudioListsChange}
@@ -471,6 +673,55 @@ const Player = () => {
         onBeforeDestroy={onBeforeDestroy}
         getAudioInstance={setAudioInstance}
       />
+      {isDesktop && (
+        <KaraokeLyricsOverlay
+          visible={karaokeVisible}
+          mainLyric={selectedLyricLayers.main}
+          translationLyric={selectedLyricLayers.translation}
+          pronunciationLyric={selectedLyricLayers.pronunciation}
+          showTranslation={showTranslation}
+          showPronunciation={showPronunciation}
+          translationEnabled={hasTranslationLyric}
+          pronunciationEnabled={hasPronunciationLyric}
+          onToggleTranslation={() =>
+            setTranslationPreference((previous) =>
+              hasTranslationLyric ? !previous : false,
+            )
+          }
+          onTogglePronunciation={() =>
+            setPronunciationPreference((previous) =>
+              togglePronunciationPreference(previous, hasPronunciationLyric),
+            )
+          }
+          audioInstance={audioInstance}
+          onClose={() => setKaraokeVisiblePreference(false)}
+        />
+      )}
+      <MobileKaraokeLyricsPortal active={useInlineMobileLyrics}>
+        <KaraokeLyricsOverlay
+          visible={useInlineMobileLyrics}
+          inline={true}
+          mainLyric={selectedLyricLayers.main}
+          translationLyric={selectedLyricLayers.translation}
+          pronunciationLyric={selectedLyricLayers.pronunciation}
+          showTranslation={showTranslation}
+          showPronunciation={showPronunciation}
+          translationEnabled={hasTranslationLyric}
+          pronunciationEnabled={hasPronunciationLyric}
+          onToggleTranslation={() =>
+            setTranslationPreference((previous) =>
+              hasTranslationLyric ? !previous : false,
+            )
+          }
+          onTogglePronunciation={() =>
+            setPronunciationPreference((previous) =>
+              togglePronunciationPreference(previous, hasPronunciationLyric),
+            )
+          }
+          audioInstance={audioInstance}
+          onClose={() => setKaraokeVisiblePreference(false)}
+        />
+      </MobileKaraokeLyricsPortal>
       <GlobalHotKeys handlers={handlers} keyMap={keyMap} allowChanges />
     </ThemeProvider>
   )
