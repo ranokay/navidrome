@@ -641,3 +641,339 @@ var _ = Describe("helpers", func() {
 		})
 	})
 })
+
+var _ = Describe("buildLyricCues", func() {
+	It("returns nil for empty cue slice", func() {
+		Expect(buildLyricCues(nil, nil)).To(BeNil())
+		Expect(buildLyricCues([]model.Cue{}, nil)).To(BeNil())
+	})
+
+	It("skips cues without a Start", func() {
+		cues := []model.Cue{
+			{Value: "no start", ByteStart: 0, ByteEnd: 7},
+		}
+		result := buildLyricCues(cues, nil)
+		Expect(result).To(BeEmpty())
+	})
+
+	It("returns cues with correct Start, Value, ByteStart, ByteEnd", func() {
+		t1 := int64(1000)
+		cues := []model.Cue{
+			{Start: &t1, Value: "Hello", ByteStart: 0, ByteEnd: 4},
+		}
+		result := buildLyricCues(cues, nil)
+		Expect(result).To(HaveLen(1))
+		Expect(result[0].Start).To(Equal(t1))
+		Expect(result[0].Value).To(Equal("Hello"))
+		Expect(result[0].ByteStart).To(Equal(0))
+		Expect(result[0].ByteEnd).To(Equal(4))
+	})
+
+	It("does not set End when no cue has an End (hasAnyEnd=false)", func() {
+		t1, t2 := int64(1000), int64(1500)
+		cues := []model.Cue{
+			{Start: &t1, Value: "word1", ByteStart: 0, ByteEnd: 4},
+			{Start: &t2, Value: "word2", ByteStart: 6, ByteEnd: 10},
+		}
+		result := buildLyricCues(cues, nil)
+		Expect(result).To(HaveLen(2))
+		Expect(result[0].End).To(BeNil())
+		Expect(result[1].End).To(BeNil())
+	})
+
+	It("sets End from next cue Start when hasAnyEnd=true and cue has no End", func() {
+		t1, t2, t3 := int64(1000), int64(1500), int64(2000)
+		cues := []model.Cue{
+			{Start: &t1, End: &t2, Value: "w1", ByteStart: 0, ByteEnd: 1},
+			{Start: &t2, Value: "w2", ByteStart: 3, ByteEnd: 4},
+			{Start: &t3, Value: "w3", ByteStart: 6, ByteEnd: 7},
+		}
+		result := buildLyricCues(cues, nil)
+		Expect(*result[1].End).To(Equal(t3))
+	})
+
+	It("uses lineEnd as fallback for last cue when no next cue exists", func() {
+		t1, t2, lineEnd := int64(1000), int64(1500), int64(3000)
+		cues := []model.Cue{
+			{Start: &t1, End: &t2, Value: "w1", ByteStart: 0, ByteEnd: 1},
+			{Start: &t2, Value: "w2 last", ByteStart: 3, ByteEnd: 9},
+		}
+		result := buildLyricCues(cues, &lineEnd)
+		Expect(*result[1].End).To(Equal(lineEnd))
+	})
+
+	It("caps cue End at next cue Start when End is later", func() {
+		t1, t2, bigEnd := int64(1000), int64(1500), int64(9999)
+		cues := []model.Cue{
+			{Start: &t1, End: &bigEnd, Value: "w1", ByteStart: 0, ByteEnd: 1},
+			{Start: &t2, End: &bigEnd, Value: "w2", ByteStart: 3, ByteEnd: 4},
+		}
+		result := buildLyricCues(cues, nil)
+		// First cue's End should be clamped to t2 (next cue Start)
+		Expect(*result[0].End).To(Equal(t2))
+	})
+
+	It("clears all Ends when last cue has no End and no fallback", func() {
+		t1, t2, t3 := int64(1000), int64(1500), int64(2000)
+		cues := []model.Cue{
+			{Start: &t1, End: &t2, Value: "w1", ByteStart: 0, ByteEnd: 1},
+			{Start: &t2, End: &t3, Value: "w2", ByteStart: 3, ByteEnd: 4},
+			{Start: &t3, Value: "w3 no end", ByteStart: 6, ByteEnd: 14},
+		}
+		// No lineEnd and last cue has no End → all ends cleared
+		result := buildLyricCues(cues, nil)
+		for _, r := range result {
+			Expect(r.End).To(BeNil())
+		}
+	})
+})
+
+var _ = Describe("buildStructuredLyric", func() {
+	var mf *model.MediaFile
+
+	BeforeEach(func() {
+		mf = &model.MediaFile{
+			Artist: "Test Artist",
+			Title:  "Test Title",
+		}
+	})
+
+	It("returns correct Lang, Synced, DisplayArtist, DisplayTitle with enhanced=false", func() {
+		t1 := int64(1000)
+		lyrics := model.Lyrics{
+			Lang:   "eng",
+			Synced: true,
+			Line: []model.Line{
+				{Start: &t1, Value: "Hello"},
+			},
+		}
+		result := buildStructuredLyric(mf, lyrics, false)
+		Expect(result.Lang).To(Equal("eng"))
+		Expect(result.Synced).To(BeTrue())
+		Expect(result.DisplayArtist).To(Equal("Test Artist"))
+		Expect(result.DisplayTitle).To(Equal("Test Title"))
+	})
+
+	It("falls back to mf Artist/Title when DisplayArtist/DisplayTitle are empty", func() {
+		t1 := int64(1000)
+		lyrics := model.Lyrics{
+			Lang: "eng",
+			Line: []model.Line{{Start: &t1, Value: "test"}},
+		}
+		result := buildStructuredLyric(mf, lyrics, false)
+		Expect(result.DisplayArtist).To(Equal("Test Artist"))
+		Expect(result.DisplayTitle).To(Equal("Test Title"))
+	})
+
+	It("uses lyrics DisplayArtist/DisplayTitle when set", func() {
+		t1 := int64(1000)
+		lyrics := model.Lyrics{
+			DisplayArtist: "Lyric Artist",
+			DisplayTitle:  "Lyric Title",
+			Lang:          "eng",
+			Line:          []model.Line{{Start: &t1, Value: "test"}},
+		}
+		result := buildStructuredLyric(mf, lyrics, false)
+		Expect(result.DisplayArtist).To(Equal("Lyric Artist"))
+		Expect(result.DisplayTitle).To(Equal("Lyric Title"))
+	})
+
+	It("does not set Kind when enhanced=false", func() {
+		t1 := int64(1000)
+		lyrics := model.Lyrics{
+			Kind: "main",
+			Lang: "eng",
+			Line: []model.Line{{Start: &t1, Value: "test"}},
+		}
+		result := buildStructuredLyric(mf, lyrics, false)
+		Expect(result.Kind).To(BeEmpty())
+	})
+
+	It("sets Kind to 'main' by default when enhanced=true and Kind is empty", func() {
+		t1 := int64(1000)
+		lyrics := model.Lyrics{
+			Lang: "eng",
+			Line: []model.Line{{Start: &t1, Value: "test"}},
+		}
+		result := buildStructuredLyric(mf, lyrics, true)
+		Expect(result.Kind).To(Equal("main"))
+	})
+
+	It("uses lyrics Kind when enhanced=true and Kind is set", func() {
+		t1 := int64(1000)
+		lyrics := model.Lyrics{
+			Kind: "translation",
+			Lang: "es",
+			Line: []model.Line{{Start: &t1, Value: "Hola"}},
+		}
+		result := buildStructuredLyric(mf, lyrics, true)
+		Expect(result.Kind).To(Equal("translation"))
+	})
+
+	It("does not produce CueLine entries when enhanced=false even with cues", func() {
+		t1, t2 := int64(1000), int64(1500)
+		lyrics := model.Lyrics{
+			Lang:   "eng",
+			Synced: true,
+			Line: []model.Line{
+				{
+					Start: &t1,
+					End:   &t2,
+					Value: "Hello",
+					Cue: []model.Cue{
+						{Start: &t1, End: &t2, Value: "Hello", ByteStart: 0, ByteEnd: 4},
+					},
+				},
+			},
+		}
+		result := buildStructuredLyric(mf, lyrics, false)
+		Expect(result.CueLine).To(BeNil())
+	})
+
+	It("produces CueLine entries when enhanced=true and line has cues", func() {
+		t1, t2 := int64(1000), int64(1500)
+		lyrics := model.Lyrics{
+			Lang:   "eng",
+			Synced: true,
+			Line: []model.Line{
+				{
+					Start: &t1,
+					End:   &t2,
+					Value: "Hello",
+					Cue: []model.Cue{
+						{Start: &t1, End: &t2, Value: "Hello", ByteStart: 0, ByteEnd: 4},
+					},
+				},
+			},
+		}
+		result := buildStructuredLyric(mf, lyrics, true)
+		Expect(result.CueLine).To(HaveLen(1))
+		Expect(result.CueLine[0].Index).To(Equal(int32(0)))
+		Expect(result.CueLine[0].Value).To(Equal("Hello"))
+		Expect(*result.CueLine[0].Start).To(Equal(t1))
+		Expect(*result.CueLine[0].End).To(Equal(t2))
+	})
+
+	It("sets Agents in response only when enhanced=true and cue lines exist", func() {
+		t1, t2 := int64(1000), int64(1500)
+		lyrics := model.Lyrics{
+			Lang:   "eng",
+			Agents: []model.Agent{{ID: "lead", Role: "main", Name: "Lead"}},
+			Synced: true,
+			Line: []model.Line{
+				{
+					Start: &t1,
+					End:   &t2,
+					Value: "Hello",
+					Cue: []model.Cue{
+						{Start: &t1, End: &t2, Value: "Hello", ByteStart: 0, ByteEnd: 4, AgentID: "lead"},
+					},
+				},
+			},
+		}
+		result := buildStructuredLyric(mf, lyrics, true)
+		Expect(result.Agents).To(HaveLen(1))
+		Expect(result.Agents[0].ID).To(Equal("lead"))
+		Expect(result.Agents[0].Role).To(Equal("main"))
+	})
+
+	It("does not set Agents when enhanced=true but no cue lines", func() {
+		t1 := int64(1000)
+		lyrics := model.Lyrics{
+			Lang:   "eng",
+			Agents: []model.Agent{{ID: "lead", Role: "main"}},
+			Synced: true,
+			Line: []model.Line{
+				{Start: &t1, Value: "Plain line"},
+			},
+		}
+		result := buildStructuredLyric(mf, lyrics, true)
+		Expect(result.Agents).To(BeNil())
+	})
+
+	It("produces multiple CueLines when cues belong to different agents", func() {
+		t1, t2, t3 := int64(1000), int64(1400), int64(2000)
+		lyrics := model.Lyrics{
+			Lang:   "eng",
+			Synced: true,
+			Agents: []model.Agent{
+				{ID: "main", Role: "main"},
+				{ID: "__nd_bg__|main", Role: "bg"},
+			},
+			Line: []model.Line{
+				{
+					Start: &t1,
+					End:   &t3,
+					Value: "Hello echo",
+					Cue: []model.Cue{
+						{Start: &t1, End: &t2, Value: "Hello", ByteStart: 0, ByteEnd: 4, AgentID: "main"},
+						{Start: &t2, End: &t3, Value: "echo", ByteStart: 6, ByteEnd: 9, AgentID: "__nd_bg__|main"},
+					},
+				},
+			},
+		}
+		result := buildStructuredLyric(mf, lyrics, true)
+		Expect(result.CueLine).To(HaveLen(2))
+		Expect(result.CueLine[0].AgentID).To(Equal("main"))
+		Expect(result.CueLine[1].AgentID).To(Equal("__nd_bg__|main"))
+	})
+})
+
+var _ = Describe("buildLyricsList", func() {
+	var mf *model.MediaFile
+
+	BeforeEach(func() {
+		mf = &model.MediaFile{
+			Artist: "Test Artist",
+			Title:  "Test Title",
+		}
+	})
+
+	It("returns all entries when enhanced=true regardless of Kind", func() {
+		t1 := int64(1000)
+		list := model.LyricList{
+			{Kind: "main", Lang: "eng", Synced: true, Line: []model.Line{{Start: &t1, Value: "main"}}},
+			{Kind: "translation", Lang: "es", Synced: true, Line: []model.Line{{Start: &t1, Value: "trans"}}},
+			{Kind: "pronunciation", Lang: "ja-latn", Synced: true, Line: []model.Line{{Start: &t1, Value: "pron"}}},
+		}
+		result := buildLyricsList(mf, list, true)
+		Expect(result.StructuredLyrics).To(HaveLen(3))
+	})
+
+	It("filters to only main/empty-kind entries when enhanced=false", func() {
+		t1 := int64(1000)
+		list := model.LyricList{
+			{Kind: "main", Lang: "eng", Synced: true, Line: []model.Line{{Start: &t1, Value: "main"}}},
+			{Kind: "translation", Lang: "es", Synced: true, Line: []model.Line{{Start: &t1, Value: "trans"}}},
+			{Kind: "pronunciation", Lang: "ja-latn", Synced: true, Line: []model.Line{{Start: &t1, Value: "pron"}}},
+			{Kind: "", Lang: "por", Synced: true, Line: []model.Line{{Start: &t1, Value: "no kind"}}},
+		}
+		result := buildLyricsList(mf, list, false)
+		Expect(result.StructuredLyrics).To(HaveLen(2))
+		Expect(result.StructuredLyrics[0].Lang).To(Equal("eng"))
+		Expect(result.StructuredLyrics[1].Lang).To(Equal("por"))
+	})
+
+	It("returns empty list when input is empty", func() {
+		result := buildLyricsList(mf, model.LyricList{}, false)
+		Expect(result.StructuredLyrics).To(HaveLen(0))
+	})
+
+	It("sets Kind in response entries when enhanced=true", func() {
+		t1 := int64(1000)
+		list := model.LyricList{
+			{Kind: "translation", Lang: "es", Synced: true, Line: []model.Line{{Start: &t1, Value: "trans"}}},
+		}
+		result := buildLyricsList(mf, list, true)
+		Expect(result.StructuredLyrics[0].Kind).To(Equal("translation"))
+	})
+
+	It("does not set Kind in response entries when enhanced=false", func() {
+		t1 := int64(1000)
+		list := model.LyricList{
+			{Kind: "main", Lang: "eng", Synced: true, Line: []model.Line{{Start: &t1, Value: "main"}}},
+		}
+		result := buildLyricsList(mf, list, false)
+		Expect(result.StructuredLyrics[0].Kind).To(BeEmpty())
+	})
+})
