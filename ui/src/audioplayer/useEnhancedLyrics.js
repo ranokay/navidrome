@@ -53,12 +53,16 @@ const readCachedLyrics = (cacheKey) => {
   return cached.layers
 }
 
-const fetchLyrics = ({ trackId, preferredLanguage, cacheKey, signal }) => {
-  const existing = inFlight.get(cacheKey)
-  if (existing) return existing
-
-  const request = subsonic
-    .getLyricsBySongId(trackId, { signal })
+const createLyricsRequest = ({ trackId, preferredLanguage, cacheKey }) => {
+  const controller = new AbortController()
+  const entry = {
+    controller,
+    consumers: 0,
+    settled: false,
+    promise: null,
+  }
+  entry.promise = subsonic
+    .getLyricsBySongId(trackId, { signal: controller.signal })
     .then((response) => {
       const selected = normalizeLyricLayers(
         selectLyricLayers(readStructuredLyrics(response), preferredLanguage),
@@ -74,11 +78,28 @@ const fetchLyrics = ({ trackId, preferredLanguage, cacheKey, signal }) => {
       return selected
     })
     .finally(() => {
-      if (inFlight.get(cacheKey) === request) inFlight.delete(cacheKey)
+      entry.settled = true
+      if (inFlight.get(cacheKey) === entry) inFlight.delete(cacheKey)
     })
+  inFlight.set(cacheKey, entry)
+  return entry
+}
 
-  inFlight.set(cacheKey, request)
-  return request
+const acquireLyricsRequest = ({ trackId, preferredLanguage, cacheKey }) => {
+  const entry =
+    inFlight.get(cacheKey) ||
+    createLyricsRequest({ trackId, preferredLanguage, cacheKey })
+  entry.consumers += 1
+  let released = false
+  return {
+    promise: entry.promise,
+    release: () => {
+      if (released) return
+      released = true
+      entry.consumers = Math.max(0, entry.consumers - 1)
+      if (!entry.settled && entry.consumers === 0) entry.controller.abort()
+    },
+  }
 }
 
 const useEnhancedLyrics = ({
@@ -116,8 +137,12 @@ const useEnhancedLyrics = ({
       return undefined
     }
 
-    const controller = new AbortController()
     let active = true
+    const request = acquireLyricsRequest({
+      trackId,
+      preferredLanguage,
+      cacheKey,
+    })
     setState({
       cacheKey,
       layers: emptyLyricLayers,
@@ -125,12 +150,7 @@ const useEnhancedLyrics = ({
       error: null,
     })
 
-    fetchLyrics({
-      trackId,
-      preferredLanguage,
-      cacheKey,
-      signal: controller.signal,
-    })
+    request.promise
       .then((layers) => {
         if (!active) return
         setState({ cacheKey, layers, loading: false, error: null })
@@ -148,7 +168,7 @@ const useEnhancedLyrics = ({
 
     return () => {
       active = false
-      controller.abort()
+      request.release()
     }
   }, [cacheKey, disabled, preferredLanguage, requested, trackId])
 
@@ -164,6 +184,7 @@ const useEnhancedLyrics = ({
 
 export const clearEnhancedLyricsCache = () => {
   cache.clear()
+  inFlight.forEach((entry) => entry.controller.abort())
   inFlight.clear()
 }
 
