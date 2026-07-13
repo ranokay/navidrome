@@ -1,0 +1,73 @@
+name: Run one-off lyrics fix
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/run-lyrics-fix-pr-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: lyrics-sidebar-performance
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Extract and apply prepared fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/fix-lyrics-gradient-once.yml').read_text()
+          start_marker = "          python3 <<'PY'\n"
+          end_marker = "\n          PY\n"
+          if start_marker not in workflow or end_marker not in workflow:
+              raise RuntimeError('Could not find embedded Python fix in prepared workflow')
+          embedded = workflow.split(start_marker, 1)[1].split(end_marker, 1)[0]
+          script = textwrap.dedent(embedded)
+          exec(compile(script, 'embedded-lyrics-fix.py', 'exec'))
+
+          rows_path = Path('ui/src/audioplayer/LyricsLineRows.jsx')
+          rows = rows_path.read_text()
+          rows = rows.replace(
+              'const buildTokenData = (token, rgb, window, text) => {',
+              'const buildTokenData = (token, rgb) => {',
+              1,
+          )
+          rows_path.write_text(rows)
+          PY
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Format changed UI files
+        working-directory: ui
+        run: npx prettier --write src/audioplayer/LyricsPanel.jsx src/audioplayer/LyricsLineRows.jsx src/audioplayer/useLyricsTimeline.js src/audioplayer/lyricsKaraokeConstants.js src/audioplayer/LyricsPanel.test.jsx
+      - name: Validate UI
+        working-directory: ui
+        run: |
+          npm run check-formatting
+          npm run lint
+          npm test
+          npm run build
+      - name: Commit fixes and remove temporary workflows
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-lyrics-gradient-once.yml
+          git rm .github/workflows/run-lyrics-fix-pr-once.yml
+          git add ui/src/audioplayer
+          git commit -m "fix(ui): refine lyrics layer matching and highlighting"
+          git push origin HEAD:lyrics-sidebar-performance
