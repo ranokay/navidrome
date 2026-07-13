@@ -8,7 +8,7 @@ export const emptyLyricLayers = Object.freeze({
   pronunciation: null,
 })
 
-const LYRICS_CACHE_SCHEMA_VERSION = 1
+const LYRICS_CACHE_SCHEMA_VERSION = 2
 const MAX_LYRIC_CACHE_ENTRIES = 75
 const NEGATIVE_CACHE_TTL_MS = 30_000
 
@@ -20,6 +20,65 @@ const normalizeLyricLayers = (layers) => ({
   translation: layers?.translation || null,
   pronunciation: layers?.pronunciation || null,
 })
+
+const normalizeComparableText = (value) =>
+  String(value || '')
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[\p{P}\p{S}\s]+/gu, '')
+
+const finiteTime = (value) => {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+const findReferenceLine = (line, index, referenceLines) => {
+  const start = finiteTime(line?.start)
+  if (start != null) {
+    const timedMatch = referenceLines.find((candidate) => {
+      const candidateStart = finiteTime(candidate?.start)
+      return candidateStart != null && Math.abs(candidateStart - start) <= 20
+    })
+    if (timedMatch) return timedMatch
+  }
+  return referenceLines[index] || null
+}
+
+const filterRedundantLines = (lines, referenceLines) => {
+  if (!Array.isArray(lines) || !Array.isArray(referenceLines)) return lines
+  return lines.filter((line, index) => {
+    const text = normalizeComparableText(line?.value)
+    if (!text) return true
+    const reference = findReferenceLine(line, index, referenceLines)
+    return text !== normalizeComparableText(reference?.value)
+  })
+}
+
+const removeRedundantTranslations = (layers) => {
+  const main = layers.main
+  const translation = layers.translation
+  if (!main || !translation) return layers
+
+  const mainLines = Array.isArray(main.line) ? main.line : []
+  const mainCueLines = Array.isArray(main.cueLine) ? main.cueLine : []
+  return {
+    ...layers,
+    translation: {
+      ...translation,
+      ...(Array.isArray(translation.line)
+        ? { line: filterRedundantLines(translation.line, mainLines) }
+        : {}),
+      ...(Array.isArray(translation.cueLine)
+        ? {
+            cueLine: filterRedundantLines(
+              translation.cueLine,
+              mainCueLines.length > 0 ? mainCueLines : mainLines,
+            ),
+          }
+        : {}),
+    },
+  }
+}
 
 const readStructuredLyrics = (response) =>
   response?.json?.['subsonic-response']?.lyricsList?.structuredLyrics || []
@@ -64,8 +123,10 @@ const createLyricsRequest = ({ trackId, preferredLanguage, cacheKey }) => {
   entry.promise = subsonic
     .getLyricsBySongId(trackId, { signal: controller.signal })
     .then((response) => {
-      const selected = normalizeLyricLayers(
-        selectLyricLayers(readStructuredLyrics(response), preferredLanguage),
+      const selected = removeRedundantTranslations(
+        normalizeLyricLayers(
+          selectLyricLayers(readStructuredLyrics(response), preferredLanguage),
+        ),
       )
       const hasAnyLayer = Boolean(
         selected.main || selected.translation || selected.pronunciation,
