@@ -86,9 +86,11 @@ const createLyricsRequest = ({ trackId, preferredLanguage, cacheKey }) => {
 }
 
 const acquireLyricsRequest = ({ trackId, preferredLanguage, cacheKey }) => {
+  const existing = inFlight.get(cacheKey)
   const entry =
-    inFlight.get(cacheKey) ||
-    createLyricsRequest({ trackId, preferredLanguage, cacheKey })
+    existing && !existing.controller.signal.aborted
+      ? existing
+      : createLyricsRequest({ trackId, preferredLanguage, cacheKey })
   entry.consumers += 1
   let released = false
   return {
