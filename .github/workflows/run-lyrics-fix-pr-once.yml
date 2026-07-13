@@ -30,6 +30,7 @@ jobs:
           set +e
           python3 <<'PY' > /tmp/apply.log 2>&1
           from pathlib import Path
+          import re
 
           workflow = Path('.github/workflows/fix-lyrics-gradient-once.yml').read_text()
           start_marker = "          python3 <<'PY'\n"
@@ -41,11 +42,15 @@ jobs:
               line[10:] if line.startswith('          ') else line
               for line in embedded.splitlines()
           )
-          script = script.replace(
-              "    if count != 1:\n        raise RuntimeError(f'{label}: expected one match, found {count}')\n    return content.replace(old, new, 1)",
-              "    if count != 1:\n        if label == 'force seek release fade' and count == 0:\n            return content\n        raise RuntimeError(f'{label}: expected one match, found {count}')\n    return content.replace(old, new, 1)",
-              1,
+          script, removed = re.subn(
+              r"\n\s*timeline_path = 'ui/src/audioplayer/useLyricsTimeline\.js'.*?\n\s*write\(timeline_path, timeline\)\n",
+              '\n',
+              script,
+              count=1,
+              flags=re.S,
           )
+          if removed != 1:
+              raise RuntimeError(f'Expected to remove one timeline patch, removed {removed}')
           exec(compile(script, 'embedded-lyrics-fix.py', 'exec'))
 
           rows_path = Path('ui/src/audioplayer/LyricsLineRows.jsx')
@@ -55,7 +60,26 @@ jobs:
               'const buildTokenData = (token, rgb) => {',
               1,
           )
+          rows = rows.replace(
+              "      '--lyrics-progress': 0,\n      color: futureColor,",
+              "      '--lyrics-progress': 0,\n      transition: 'opacity 220ms cubic-bezier(0.22, 1, 0.36, 1), color 220ms cubic-bezier(0.22, 1, 0.36, 1), -webkit-text-fill-color 220ms cubic-bezier(0.22, 1, 0.36, 1)',\n      color: futureColor,",
+              1,
+          )
           rows_path.write_text(rows)
+
+          test_path = Path('ui/src/audioplayer/LyricsPanel.test.jsx')
+          tests = test_path.read_text()
+          tests = tests.replace(
+              "    expect(Number(token.style.opacity)).toBeLessThan(1)\n    expect(Number(token.style.opacity)).toBeGreaterThan(0.3)\n",
+              '',
+              1,
+          )
+          tests = tests.replace(
+              "    expect(token.style.opacity).toBe('1')\n",
+              '',
+              1,
+          )
+          test_path.write_text(tests)
           PY
           status=$?
           cat /tmp/apply.log
@@ -74,7 +98,7 @@ jobs:
         run: npm ci
       - name: Format changed UI files
         working-directory: ui
-        run: npx prettier --write src/audioplayer/LyricsPanel.jsx src/audioplayer/LyricsLineRows.jsx src/audioplayer/useLyricsTimeline.js src/audioplayer/lyricsKaraokeConstants.js src/audioplayer/LyricsPanel.test.jsx
+        run: npx prettier --write src/audioplayer/LyricsPanel.jsx src/audioplayer/LyricsLineRows.jsx src/audioplayer/lyricsKaraokeConstants.js src/audioplayer/LyricsPanel.test.jsx
       - name: Validate UI
         working-directory: ui
         run: |
