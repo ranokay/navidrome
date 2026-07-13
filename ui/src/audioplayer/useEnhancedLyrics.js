@@ -97,7 +97,10 @@ const acquireLyricsRequest = ({ trackId, preferredLanguage, cacheKey }) => {
       if (released) return
       released = true
       entry.consumers = Math.max(0, entry.consumers - 1)
-      if (!entry.settled && entry.consumers === 0) entry.controller.abort()
+      if (!entry.settled && entry.consumers === 0) {
+        if (inFlight.get(cacheKey) === entry) inFlight.delete(cacheKey)
+        entry.controller.abort()
+      }
     },
   }
 }
