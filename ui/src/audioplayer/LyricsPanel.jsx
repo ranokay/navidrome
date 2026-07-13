@@ -22,13 +22,9 @@ import {
   KARAOKE_AUX_LINE_HEIGHT,
   KARAOKE_DESKTOP_ACTIVE_LINE_ANCHOR_RATIO,
   KARAOKE_EASING,
-  KARAOKE_HIGHLIGHT_LEAD_MS,
   KARAOKE_INLINE_ACTIVE_LINE_ANCHOR_RATIO,
   KARAOKE_MANUAL_SCROLL_PAUSE_MS,
-  KARAOKE_SCROLL_PRE_ROLL_MS,
   KARAOKE_SCROLLBAR_VISIBLE_MS,
-  clamp,
-  lerp,
 } from './lyricsKaraokeConstants'
 import { colorWithAlpha } from './lyricsKaraokeStyles'
 import {
@@ -37,13 +33,7 @@ import {
   getAnchoredScrollTop,
   getScrollEndPadding,
 } from './lyricsScroll'
-import {
-  getLineFinishedTime,
-  getLineLifecycleState,
-  getLineRenderWindow,
-  getStrictActiveLineIndex,
-} from './lyricsTiming'
-import usePlaybackClock from './usePlaybackClock'
+import useLyricsTimeline from './useLyricsTimeline'
 
 const useStyles = makeStyles((theme) => ({
   root: {
@@ -111,6 +101,12 @@ const useStyles = makeStyles((theme) => ({
   lineGroup: {
     width: '100%',
     borderRadius: theme.shape.borderRadius,
+    '&[data-active="true"] $line, &[data-lifecycle="release"] $line': {
+      color: 'var(--lyrics-active-color)',
+    },
+    '&[data-active="true"] $auxLine, &[data-lifecycle="release"] $auxLine': {
+      color: 'var(--lyrics-active-color)',
+    },
   },
   line: {
     display: 'inline-block',
@@ -183,10 +179,6 @@ const useStyles = makeStyles((theme) => ({
   token: {
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
-    transition: `color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
-    '@media (prefers-reduced-motion: reduce)': {
-      transition: 'none',
-    },
   },
   voiceLanes: {
     display: 'flex',
@@ -226,21 +218,15 @@ const usePrefersReducedMotion = () => {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) {
-      return undefined
-    }
-
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
     const updatePreference = () =>
       setPrefersReducedMotion(Boolean(mediaQuery.matches))
-
     updatePreference()
-
     if (mediaQuery.addEventListener) {
       mediaQuery.addEventListener('change', updatePreference)
       return () => mediaQuery.removeEventListener('change', updatePreference)
     }
-
     mediaQuery.addListener(updatePreference)
     return () => mediaQuery.removeListener(updatePreference)
   }, [])
@@ -263,7 +249,6 @@ const LyricsPanel = ({
   const classes = useStyles()
   const theme = useTheme()
   const bodyRef = useRef(null)
-  const scrollTargetLineRef = useRef(null)
   const scrollAnimationRef = useRef(null)
   const scrollbarTimerRef = useRef(null)
   const manualScrollTimerRef = useRef(null)
@@ -273,7 +258,6 @@ const LyricsPanel = ({
   const [layoutVersion, setLayoutVersion] = useState(0)
   const [hasTopFade, setHasTopFade] = useState(false)
   const [scrollEndPadding, setScrollEndPadding] = useState(0)
-  const playbackMs = usePlaybackClock(visible, audioInstance)
   const prefersReducedMotion = usePrefersReducedMotion()
   const activeLineAnchorRatio = inline
     ? KARAOKE_INLINE_ACTIVE_LINE_ANCHOR_RATIO
@@ -288,93 +272,27 @@ const LyricsPanel = ({
     () => buildKaraokeLines(pronunciationLyric),
     [pronunciationLyric],
   )
-
   const hasTimedMainLines = useMemo(
     () => hasUsableKaraokeTiming(mainLines),
     [mainLines],
   )
-  const renderPlaybackMs = playbackMs + KARAOKE_HIGHLIGHT_LEAD_MS
-  const activeIndex = useMemo(
-    () =>
-      hasTimedMainLines ? getStrictActiveLineIndex(mainLines, playbackMs) : -1,
-    [hasTimedMainLines, mainLines, playbackMs],
-  )
-  const lineLifecycleStates = useMemo(
-    () =>
-      mainLines.map((line, idx) =>
-        hasTimedMainLines
-          ? getLineLifecycleState(
-              line,
-              mainLines[idx + 1]?.start ?? null,
-              playbackMs,
-            )
-          : {
-              phase: 'idle',
-              isActive: false,
-              isRelease: false,
-              isAnimating: false,
-              highlightAlphaScale: 0,
-              lineFocusScale: 0,
-            },
-      ),
-    [hasTimedMainLines, mainLines, playbackMs],
-  )
-  const scrollTargetIndex = useMemo(() => {
-    if (!hasTimedMainLines || mainLines.length === 0) return -1
+  const {
+    activeIndexes,
+    primaryIndex: activeIndex,
+    scrollTargetIndex,
+    registerLine,
+    registerToken,
+    getLineNode,
+    syncNow,
+    timeline,
+  } = useLyricsTimeline({
+    lines: mainLines,
+    audioInstance,
+    visible: visible && hasTimedMainLines,
+    reducedMotion: prefersReducedMotion,
+  })
+  const activeIndexSet = useMemo(() => new Set(activeIndexes), [activeIndexes])
 
-    for (let i = 0; i < mainLines.length; i += 1) {
-      const { start } = getLineRenderWindow(
-        mainLines[i],
-        mainLines[i + 1]?.start ?? null,
-      )
-      if (
-        start != null &&
-        playbackMs >= start - KARAOKE_SCROLL_PRE_ROLL_MS &&
-        playbackMs < start
-      ) {
-        return i
-      }
-    }
-
-    if (activeIndex >= 0) return activeIndex
-
-    let latestStartedIndex = -1
-    for (let i = 0; i < mainLines.length; i += 1) {
-      const nextLineStart = mainLines[i + 1]?.start ?? null
-      const { start } = getLineRenderWindow(mainLines[i], nextLineStart)
-      if (start == null) continue
-      if (playbackMs < start) break
-      latestStartedIndex = i
-    }
-
-    if (latestStartedIndex >= 0) {
-      const nextLineStart = mainLines[latestStartedIndex + 1]?.start ?? null
-      const finishedTime = getLineFinishedTime(
-        mainLines[latestStartedIndex],
-        nextLineStart,
-      )
-      if (
-        finishedTime != null &&
-        playbackMs >= finishedTime &&
-        latestStartedIndex + 1 < mainLines.length
-      ) {
-        const nextIndex = latestStartedIndex + 1
-        const nextNextLineStart = mainLines[nextIndex + 1]?.start ?? null
-        const { start: nextStart } = getLineRenderWindow(
-          mainLines[nextIndex],
-          nextNextLineStart,
-        )
-        if (
-          nextStart != null &&
-          playbackMs >= nextStart - KARAOKE_SCROLL_PRE_ROLL_MS
-        ) {
-          return nextIndex
-        }
-      }
-    }
-
-    return latestStartedIndex
-  }, [activeIndex, hasTimedMainLines, mainLines, playbackMs])
   const trByMainIndex = useMemo(() => {
     if (!showTranslation || translationLines.length === 0) return {}
     const map = {}
@@ -407,11 +325,36 @@ const LyricsPanel = ({
     [theme],
   )
 
+  const layerStyles = useMemo(() => {
+    const styleFor = (layer) => {
+      const sourceColor = colors[layer]
+      if (!hasTimedMainLines) {
+        return {
+          opacity: 1,
+          color: colorWithAlpha(sourceColor, layer === 'main' ? 0.98 : 0.86),
+        }
+      }
+      const idleAlpha =
+        layer === 'main' ? 0.46 : layer === 'translation' ? 0.34 : 0.38
+      const activeAlpha =
+        layer === 'main' ? 0.98 : layer === 'translation' ? 0.72 : 0.78
+      return {
+        opacity: 1,
+        color: colorWithAlpha(sourceColor, idleAlpha),
+        '--lyrics-active-color': colorWithAlpha(sourceColor, activeAlpha),
+      }
+    }
+    return {
+      main: styleFor('main'),
+      pronunciation: styleFor('pronunciation'),
+      translation: styleFor('translation'),
+    }
+  }, [colors, hasTimedMainLines])
+
   const showScrollbarForManualScroll = useCallback(() => {
     if (scrollbarTimerRef.current) {
       window.clearTimeout(scrollbarTimerRef.current)
     }
-
     setShowScrollbar(true)
     scrollbarTimerRef.current = window.setTimeout(() => {
       setShowScrollbar(false)
@@ -468,16 +411,13 @@ const LyricsPanel = ({
   useLayoutEffect(() => {
     const body = bodyRef.current
     if (!visible || !body) return undefined
-
     const ResizeObserverConstructor =
       typeof window !== 'undefined' ? window.ResizeObserver : null
     if (!ResizeObserverConstructor) return undefined
-
     const resizeObserver = new ResizeObserverConstructor(() => {
       setLayoutVersion((current) => current + 1)
     })
     resizeObserver.observe(body)
-
     return () => resizeObserver.disconnect()
   }, [visible])
 
@@ -487,7 +427,6 @@ const LyricsPanel = ({
       setScrollEndPadding(0)
       return
     }
-
     const nextPadding = getScrollEndPadding(body, activeLineAnchorRatio)
     setScrollEndPadding((current) =>
       current === nextPadding ? current : nextPadding,
@@ -503,7 +442,6 @@ const LyricsPanel = ({
   useLayoutEffect(() => {
     const body = bodyRef.current
     if (!visible || !body) return
-
     cancelScrollAnimation(scrollAnimationRef)
     clearManualScrollTimer()
     manualScrollUntilRef.current = 0
@@ -512,18 +450,16 @@ const LyricsPanel = ({
   }, [clearManualScrollTimer, mainLyric, visible])
 
   useEffect(() => {
-    if (!visible || !hasTimedMainLines) {
+    if (!visible || !hasTimedMainLines || scrollTargetIndex < 0) {
       cancelScrollAnimation(scrollAnimationRef)
       return undefined
     }
 
-    let animFrameId = window.requestAnimationFrame(() => {
-      if (manualScrollUntilRef.current > 0) return
-
+    const animFrameId = window.requestAnimationFrame(() => {
+      if (manualScrollUntilRef.current > performance.now()) return
       const body = bodyRef.current
-      const targetNode = scrollTargetLineRef.current
+      const targetNode = getLineNode(scrollTargetIndex)
       if (!body || !targetNode) return
-
       animateScrollTop({
         body,
         targetTop: getAnchoredScrollTop(
@@ -536,12 +472,11 @@ const LyricsPanel = ({
       })
     })
 
-    return () => {
-      if (animFrameId) window.cancelAnimationFrame(animFrameId)
-    }
+    return () => window.cancelAnimationFrame(animFrameId)
   }, [
-    autoScrollResumeKey,
     activeLineAnchorRatio,
+    autoScrollResumeKey,
+    getLineNode,
     hasTimedMainLines,
     layoutVersion,
     prefersReducedMotion,
@@ -549,9 +484,7 @@ const LyricsPanel = ({
     visible,
   ])
 
-  if (!visible) {
-    return null
-  }
+  if (!visible) return null
 
   if (!hasStructuredLyricContent(mainLyric) || mainLines.length === 0) {
     const message = loading
@@ -559,7 +492,6 @@ const LyricsPanel = ({
       : error
         ? 'Lyrics unavailable'
         : 'No lyrics available'
-
     return (
       <div
         className={clsx(classes.root, { [classes.inlineRoot]: inline })}
@@ -578,46 +510,10 @@ const LyricsPanel = ({
     )
   }
 
-  const getLayerActiveAlpha = (layer) => {
-    if (layer === 'main') return 0.98
-    if (layer === 'translation') return 0.72
-    return 0.78
-  }
-
-  const getLayerIdleAlpha = (layer) => {
-    if (layer === 'main') return 0.46
-    if (layer === 'translation') return 0.34
-    return 0.38
-  }
-
-  const getLineFocusScale = (idx) =>
-    clamp(lineLifecycleStates[idx]?.lineFocusScale ?? 0, 0, 1)
-
-  const getLineStyle = (idx, layer) => {
-    const sourceColor = colors[layer]
-    if (!hasTimedMainLines) {
-      return {
-        opacity: 1,
-        color: colorWithAlpha(sourceColor, layer === 'main' ? 0.98 : 0.86),
-      }
-    }
-
-    const focusScale = getLineFocusScale(idx)
-    const colorAlpha = lerp(
-      getLayerIdleAlpha(layer),
-      getLayerActiveAlpha(layer),
-      focusScale,
-    )
-
-    return {
-      opacity: 1,
-      color: colorWithAlpha(sourceColor, colorAlpha),
-    }
-  }
-
   const seekToLine = (line) => {
     if (!audioInstance || line.start == null) return
     audioInstance.currentTime = line.start / 1000
+    syncNow(line.start, true)
     resumeAutoScroll()
   }
 
@@ -641,8 +537,7 @@ const LyricsPanel = ({
         data-top-fade-enabled={hasTopFade ? 'true' : 'false'}
         onScroll={updateTopFade}
         onWheel={markManualScrollIntent}
-        onPointerDown={markManualScrollIntent}
-        onTouchStart={markManualScrollIntent}
+        onTouchMove={markManualScrollIntent}
       >
         <div
           className={classes.lines}
@@ -656,38 +551,25 @@ const LyricsPanel = ({
           {mainLines.map((line, idx) => {
             const trLine = trByMainIndex[idx]
             const prLine = prByMainIndex[idx]
-            const mainNextLineStart = mainLines[idx + 1]?.start ?? null
+            const mainNextLineStart = timeline.windows[idx]?.nextTimedStart ?? null
             const showTr = shouldShowAuxLine(line, trLine)
             const showPr = shouldShowAuxLine(line, prLine)
-            const mainLineStyle = getLineStyle(idx, 'main')
-            const pronunciationStyle = getLineStyle(idx, 'pronunciation')
-            const lifecycle = lineLifecycleStates[idx] || {}
-            const isActiveLine = Boolean(lifecycle.isActive)
-            const shouldHighlightTokens =
-              hasTimedMainLines && Boolean(lifecycle.isAnimating)
-            const highlightAlphaScale = lifecycle.highlightAlphaScale ?? 0
             const lineLanes = getLineLanes(line)
             const canSeekLine = Boolean(audioInstance && line.start != null)
+            const isActiveLine = activeIndexSet.has(idx)
             return (
               <div
                 key={`line-${line.index}-${line.start ?? idx}`}
-                ref={
-                  idx === scrollTargetIndex && hasTimedMainLines
-                    ? scrollTargetLineRef
-                    : null
-                }
+                ref={(node) => registerLine(idx, node)}
                 className={classes.lineGroup}
                 data-active={isActiveLine ? 'true' : 'false'}
-                data-lifecycle={lifecycle.phase || 'idle'}
-                data-highlight-active={shouldHighlightTokens ? 'true' : 'false'}
+                data-lifecycle={isActiveLine ? 'active' : 'idle'}
                 aria-current={idx === activeIndex ? 'true' : undefined}
                 data-scroll-target={
                   idx === scrollTargetIndex ? 'true' : 'false'
                 }
                 data-testid="lyrics-line-group"
-                style={{
-                  cursor: canSeekLine ? 'pointer' : undefined,
-                }}
+                style={{ cursor: canSeekLine ? 'pointer' : undefined }}
                 role={canSeekLine ? 'button' : undefined}
                 tabIndex={canSeekLine ? 0 : undefined}
                 onClick={() => seekToLine(line)}
@@ -719,37 +601,38 @@ const LyricsPanel = ({
                         [classes.secondaryVoiceLane]: laneIdx > 0,
                       })
                       const highlightedLane = buildHighlightedMainLine(lane)
+                      const rowKey = lane.key || `lane-${laneIdx}`
 
                       return showPr && laneIdx === 0 ? (
                         <KaraokeStackedLineRow
-                          key={lane.key || `lane-${laneIdx}`}
+                          key={rowKey}
+                          lineIndex={idx}
                           line={highlightedLane}
                           pronunciationLine={buildHighlightedAuxLine(
                             line,
                             prLine,
                           )}
-                          pronunciationStyle={pronunciationStyle}
+                          pronunciationStyle={layerStyles.pronunciation}
                           nextLineStart={mainNextLineStart}
-                          renderPlaybackMs={renderPlaybackMs}
                           className={laneClassName}
-                          style={mainLineStyle}
+                          style={layerStyles.main}
                           tokenClassName={classes.token}
                           classes={classes}
-                          highlightTokens={shouldHighlightTokens}
-                          highlightAlphaScale={highlightAlphaScale}
+                          registerToken={registerToken}
+                          rowKey={rowKey}
                           testId="lyrics-voice-lane"
                         />
                       ) : (
                         <KaraokeLineRow
-                          key={lane.key || `lane-${laneIdx}`}
+                          key={rowKey}
+                          lineIndex={idx}
                           line={highlightedLane}
                           nextLineStart={mainNextLineStart}
-                          renderPlaybackMs={renderPlaybackMs}
                           className={laneClassName}
-                          style={mainLineStyle}
+                          style={layerStyles.main}
                           tokenClassName={classes.token}
-                          highlightTokens={shouldHighlightTokens}
-                          highlightAlphaScale={highlightAlphaScale}
+                          registerToken={registerToken}
+                          rowKey={rowKey}
                           testId="lyrics-voice-lane"
                         />
                       )
@@ -757,44 +640,44 @@ const LyricsPanel = ({
                   </div>
                 ) : showPr ? (
                   <KaraokeStackedLineRow
+                    lineIndex={idx}
                     line={buildHighlightedMainLine(line)}
                     pronunciationLine={buildHighlightedAuxLine(line, prLine)}
-                    pronunciationStyle={pronunciationStyle}
+                    pronunciationStyle={layerStyles.pronunciation}
                     nextLineStart={mainNextLineStart}
-                    renderPlaybackMs={renderPlaybackMs}
                     className={clsx(classes.line, {
                       [classes.inlineLine]: inline,
                     })}
-                    style={mainLineStyle}
+                    style={layerStyles.main}
                     tokenClassName={classes.token}
                     classes={classes}
-                    highlightTokens={shouldHighlightTokens}
-                    highlightAlphaScale={highlightAlphaScale}
+                    registerToken={registerToken}
+                    rowKey="main"
                   />
                 ) : (
                   <KaraokeLineRow
+                    lineIndex={idx}
                     line={buildHighlightedMainLine(line)}
                     nextLineStart={mainNextLineStart}
-                    renderPlaybackMs={renderPlaybackMs}
                     className={clsx(classes.line, {
                       [classes.inlineLine]: inline,
                     })}
-                    style={mainLineStyle}
+                    style={layerStyles.main}
                     tokenClassName={classes.token}
-                    highlightTokens={shouldHighlightTokens}
-                    highlightAlphaScale={highlightAlphaScale}
+                    registerToken={registerToken}
+                    rowKey="main"
                   />
                 )}
                 {showTr && (
                   <KaraokeLineRow
+                    lineIndex={idx}
                     line={buildHighlightedAuxLine(line, trLine)}
                     nextLineStart={null}
-                    renderPlaybackMs={renderPlaybackMs}
                     className={clsx(classes.auxLine, classes.translationLine)}
-                    style={getLineStyle(idx, 'translation')}
+                    style={layerStyles.translation}
                     tokenClassName={classes.token}
-                    highlightTokens={shouldHighlightTokens}
-                    highlightAlphaScale={highlightAlphaScale}
+                    registerToken={registerToken}
+                    rowKey="translation"
                   />
                 )}
               </div>
