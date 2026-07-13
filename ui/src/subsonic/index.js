@@ -121,7 +121,7 @@ const getAlbumInfo = (id) => {
 }
 
 const getSimilarSongs2 = (id, count = 100) => {
-  return httpClient(url('getSimilarSongs2', id))
+  return httpClient(url('getSimilarSongs2', id, { count }))
 }
 
 const getTopSongs = (artist, count = 50) => {
@@ -129,10 +129,10 @@ const getTopSongs = (artist, count = 50) => {
 }
 
 const getLyricsBySongId = (id, requestOptions) => {
-  return httpClient(
-    url('getLyricsBySongId', id, { enhanced: true }),
-    requestOptions,
-  )
+  const requestUrl = url('getLyricsBySongId', id, { enhanced: true })
+  return requestOptions
+    ? httpClient(requestUrl, requestOptions)
+    : httpClient(requestUrl)
 }
 
 const streamUrl = (id, options) => {
