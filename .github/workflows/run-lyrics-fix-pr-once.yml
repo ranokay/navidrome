@@ -27,6 +27,7 @@ jobs:
         shell: bash
         run: |
           set +e
+          # Run the corrected temporary patch script.
           python3 .github/scripts/apply-lyrics-rendering-fix.py > /tmp/apply.log 2>&1
           status=$?
           cat /tmp/apply.log
