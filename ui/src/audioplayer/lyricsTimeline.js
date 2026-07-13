@@ -1,6 +1,7 @@
 import { KARAOKE_SCROLL_PRE_ROLL_MS } from './lyricsKaraokeConstants'
 
 const finiteTime = (value) => {
+  if (value == null || value === '') return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
 }
