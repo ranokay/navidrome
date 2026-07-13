@@ -24,36 +24,38 @@ jobs:
       - name: Install dependencies
         working-directory: ui
         run: npm ci
-      - name: Run UI tests and capture output
+      - name: Run lyrics tests and capture output
         id: tests
         working-directory: ui
         shell: bash
         run: |
           set +e
-          npm test -- --reporter=verbose 2>&1 | tee test-output.log
+          npm test -- \
+            src/audioplayer/LyricsPanel.test.jsx \
+            src/audioplayer/LyricsSidebar.test.jsx \
+            src/audioplayer/useEnhancedLyrics.test.js \
+            src/audioplayer/useLyricsTimeline.test.js \
+            src/audioplayer/lyricsTimeline.test.js \
+            src/audioplayer/lyricsScroll.test.js \
+            --reporter=verbose 2>&1 | tee test-output.log
           status=${PIPESTATUS[0]}
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
-      - name: Expose failure diagnostics in PR body
-        if: steps.tests.outputs.status != '0'
+      - name: Expose diagnostics in PR body
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           sed -E 's/\x1B\[[0-9;]*[mK]//g' ui/test-output.log > /tmp/clean.log
-          awk '/Failed Tests|FAIL  / { found = 1 } found { print }' /tmp/clean.log > /tmp/failures.log
-          if [ ! -s /tmp/failures.log ]; then
-            tail -n 100 /tmp/clean.log > /tmp/failures.log
-          fi
           gh pr view 7 --json body --jq .body > /tmp/current-body.md
           sed '/<!-- ui-test-debug -->/,/<!-- \/ui-test-debug -->/d' /tmp/current-body.md > /tmp/original-body.md
           {
             echo '<!-- ui-test-debug -->'
-            echo '## Temporary UI test diagnostics'
+            echo '## Temporary targeted UI test diagnostics'
             echo '```text'
-            tail -n 160 /tmp/failures.log
+            tail -n 120 /tmp/clean.log
             echo '```'
             echo '<!-- /ui-test-debug -->'
             cat /tmp/original-body.md
           } > /tmp/body.md
           gh pr edit 7 --body-file /tmp/body.md
-          exit 1
+          test '${{ steps.tests.outputs.status }}' = '0'
