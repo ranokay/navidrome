@@ -24,10 +24,11 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - name: Extract and apply prepared fix
+        id: apply
         shell: bash
         run: |
-          set -euo pipefail
-          python3 <<'PY'
+          set +e
+          python3 <<'PY' > /tmp/apply.log 2>&1
           from pathlib import Path
           import textwrap
 
@@ -49,6 +50,18 @@ jobs:
           )
           rows_path.write_text(rows)
           PY
+          status=$?
+          cat /tmp/apply.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/apply.log .github/lyrics-fix-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/lyrics-fix-error.txt
+            git commit -m "chore: capture lyrics fix failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Install dependencies
         working-directory: ui
         run: npm ci
@@ -68,6 +81,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/fix-lyrics-gradient-once.yml
           git rm .github/workflows/run-lyrics-fix-pr-once.yml
+          git rm -f .github/lyrics-fix-error.txt
           git add ui/src/audioplayer
           git commit -m "fix(ui): refine lyrics layer matching and highlighting"
           git push origin HEAD:lyrics-sidebar-performance
