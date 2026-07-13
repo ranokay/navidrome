@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { animateScrollTop, cancelScrollAnimation } from './lyricsScroll'
+import {
+  animateScrollTop,
+  cancelScrollAnimation,
+  getAnchoredScrollTop,
+  getScrollEndPadding,
+} from './lyricsScroll'
 
 const createScrollableBody = (scrollTop = 0) => ({
   clientHeight: 200,
@@ -24,6 +29,42 @@ describe('lyrics scroll helpers', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('calculates end padding from the active-line anchor', () => {
+    expect(getScrollEndPadding({ clientHeight: 500 }, 0.42)).toBe(290)
+    expect(getScrollEndPadding({ clientHeight: 200 }, 0.5)).toBe(100)
+    expect(getScrollEndPadding({ clientHeight: 0 }, 0.5)).toBe(0)
+    expect(getScrollEndPadding(null, 0.5)).toBe(0)
+  })
+
+  it('anchors a target relative to the current scroll position', () => {
+    const body = {
+      ...createScrollableBody(120),
+      getBoundingClientRect: () => ({ top: 50 }),
+    }
+    const target = {
+      getBoundingClientRect: () => ({ top: 310 }),
+    }
+
+    // 120 + (310 - 50 - 200 * 0.4) = 300
+    expect(getAnchoredScrollTop(body, target, 0.4)).toBe(300)
+  })
+
+  it('clamps anchored targets to the scrollable range', () => {
+    const body = {
+      ...createScrollableBody(20),
+      getBoundingClientRect: () => ({ top: 100 }),
+    }
+    const above = {
+      getBoundingClientRect: () => ({ top: -500 }),
+    }
+    const below = {
+      getBoundingClientRect: () => ({ top: 5000 }),
+    }
+
+    expect(getAnchoredScrollTop(body, above, 0.4)).toBe(0)
+    expect(getAnchoredScrollTop(body, below, 0.4)).toBe(800)
   })
 
   it('stores a cancellable frame while animating scroll position', () => {
