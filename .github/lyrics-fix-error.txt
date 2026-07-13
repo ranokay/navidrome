@@ -1,5 +1,5 @@
 Traceback (most recent call last):
-  File "<stdin>", line 13, in <module>
-  File "embedded-lyrics-fix.py", line 342, in <module>
-  File "embedded-lyrics-fix.py", line 13, in replace_once
-RuntimeError: force seek release fade: expected one match, found 0
+  File "<stdin>", line 18, in <module>
+  File "embedded-lyrics-fix.py", line 356, in <module>
+  File "embedded-lyrics-fix.py", line 15, in replace_once
+RuntimeError: new release fade: expected one match, found 0
