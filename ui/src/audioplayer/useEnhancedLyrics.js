@@ -28,6 +28,7 @@ const normalizeComparableText = (value) =>
     .replace(/[\p{P}\p{S}\s]+/gu, '')
 
 const finiteTime = (value) => {
+  if (value == null || value === '') return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
 }
