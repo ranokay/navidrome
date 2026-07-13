@@ -149,6 +149,8 @@ const Player = () => {
     closeLyrics,
   } = usePlayerLyrics({
     trackId: playerState.current?.trackId || currentTrackId,
+    trackUpdatedAt:
+      playerState.current?.song?.updatedAt || playerState.current?.updatedAt,
     isRadio: playerState.current?.isRadio || false,
     audioInstance,
     isDesktop,
