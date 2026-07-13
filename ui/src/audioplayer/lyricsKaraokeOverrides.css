@@ -1,0 +1,11 @@
+[data-testid='lyrics-line-group'][data-active='true'] .MuiTypography-root,
+[data-testid='lyrics-line-group'][data-lifecycle='release'] .MuiTypography-root {
+  color: var(--lyrics-active-color) !important;
+  -webkit-text-fill-color: var(--lyrics-active-color) !important;
+}
+
+[data-testid='lyrics-line-group']
+  [data-wrapped]
+  > span:not([data-stacked-token='true']) {
+  display: inline !important;
+}
