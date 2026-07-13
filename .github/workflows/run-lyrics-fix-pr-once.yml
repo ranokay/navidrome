@@ -23,130 +23,13 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - name: Extract and apply prepared fix
-        id: apply
+      - name: Apply lyrics rendering fixes
         shell: bash
         run: |
           set +e
-          python3 <<'PY' > /tmp/apply.log 2>&1
-          from pathlib import Path
-          import re
-
-          workflow = Path('.github/workflows/fix-lyrics-gradient-once.yml').read_text()
-          start_marker = "          python3 <<'PY'\n"
-          end_marker = "\n          PY\n"
-          if start_marker not in workflow or end_marker not in workflow:
-              raise RuntimeError('Could not find embedded Python fix in prepared workflow')
-          embedded = workflow.split(start_marker, 1)[1].split(end_marker, 1)[0]
-          script = '\n'.join(
-              line[10:] if line.startswith('          ') else line
-              for line in embedded.splitlines()
-          )
-          script, removed_timeline = re.subn(
-              r"\n\s*timeline_path = 'ui/src/audioplayer/useLyricsTimeline\.js'.*?\n\s*write\(timeline_path, timeline\)\n",
-              '\n',
-              script,
-              count=1,
-              flags=re.S,
-          )
-          script, removed_tests = re.subn(
-              r"\n\s*test_path = 'ui/src/audioplayer/LyricsPanel\.test\.jsx'.*?\n\s*write\(test_path, tests\)\n",
-              '\n',
-              script,
-              count=1,
-              flags=re.S,
-          )
-          if removed_timeline != 1 or removed_tests != 1:
-              raise RuntimeError(
-                  f'Expected one timeline and one test patch, removed {removed_timeline} and {removed_tests}'
-              )
-          exec(compile(script, 'embedded-lyrics-fix.py', 'exec'))
-
-          rows_path = Path('ui/src/audioplayer/LyricsLineRows.jsx')
-          rows = rows_path.read_text()
-          rows = rows.replace(
-              'const buildTokenData = (token, rgb, window, text) => {',
-              'const buildTokenData = (token, rgb) => {',
-              1,
-          )
-          rows = rows.replace(
-              "      '--lyrics-progress': 0,\n      color: futureColor,",
-              "      '--lyrics-progress': 0,\n      transition: 'opacity 220ms cubic-bezier(0.22, 1, 0.36, 1), color 220ms cubic-bezier(0.22, 1, 0.36, 1), -webkit-text-fill-color 220ms cubic-bezier(0.22, 1, 0.36, 1)',\n      color: futureColor,",
-              1,
-          )
-          rows_path.write_text(rows)
-
-          test_path = Path('ui/src/audioplayer/LyricsPanel.test.jsx')
-          tests = test_path.read_text()
-          marker = "    expect(screen.getByText('translation line')).toBeInTheDocument()\n  })\n"
-          unique_test = """
-
-  it('renders each translation line under only its closest main line', () => {
-    renderPanel({
-      mainLyric: {
-        synced: true,
-        line: [
-          { start: 0, end: 1000, value: 'First main line' },
-          { start: 1000, end: 2000, value: 'Closest main line' },
-          { start: 2000, end: 3000, value: 'Later main line' },
-        ],
-      },
-      translationLyric: {
-        synced: true,
-        line: [{ start: 1100, end: 2800, value: 'One translated line' }],
-      },
-      showTranslation: true,
-    })
-
-    const translations = screen.getAllByText('One translated line')
-    expect(translations).toHaveLength(1)
-    expect(
-      translations[0].closest('[data-testid="lyrics-line-group"]'),
-    ).toHaveTextContent('Closest main line')
-  })
-"""
-          if tests.count(marker) != 1:
-              raise RuntimeError(f'Unique translation test marker count: {tests.count(marker)}')
-          tests = tests.replace(marker, marker + unique_test, 1)
-
-          short_test = """  it('uses a soft gradient wipe for short fast cues', () => {
-    renderPanel({
-      mainLyric: {
-        synced: true,
-        line: [{ start: 0, end: 180, value: 'go' }],
-        cueLine: [
-          {
-            index: 0,
-            start: 0,
-            end: 180,
-            value: 'go',
-            cue: [{ start: 0, end: 180, value: 'go' }],
-          },
-        ],
-      },
-      audioInstance: { currentTime: 0.02, paused: true },
-    })
-
-    const token = screen.getByTestId('lyrics-token')
-    expect(token).toHaveAttribute('data-lyrics-state', 'active')
-    expect(token.style.backgroundImage).toContain('linear-gradient')
-    expect(token.style.color).toBe('transparent')
-  })
-"""
-          tests, short_count = re.subn(
-              r"  it\('crossfades short cues without adding a gradient paint', \(\) => \{.*?^  \}\)\n",
-              short_test,
-              tests,
-              count=1,
-              flags=re.S | re.M,
-          )
-          if short_count != 1:
-              raise RuntimeError(f'Short cue test replacement count: {short_count}')
-          test_path.write_text(tests)
-          PY
+          python3 .github/scripts/apply-lyrics-rendering-fix.py > /tmp/apply.log 2>&1
           status=$?
           cat /tmp/apply.log
-          echo "status=$status" >> "$GITHUB_OUTPUT"
           if [ "$status" -ne 0 ]; then
             cp /tmp/apply.log .github/lyrics-fix-error.txt
             git config user.name "github-actions[bot]"
@@ -169,12 +52,13 @@ jobs:
           npm run lint
           npm test
           npm run build
-      - name: Commit fixes and remove temporary workflows
+      - name: Commit fixes and remove temporary files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/fix-lyrics-gradient-once.yml
           git rm .github/workflows/run-lyrics-fix-pr-once.yml
+          git rm .github/scripts/apply-lyrics-rendering-fix.py
           git rm -f .github/lyrics-fix-error.txt
           git add ui/src/audioplayer
           git commit -m "fix(ui): refine lyrics layer matching and highlighting"
