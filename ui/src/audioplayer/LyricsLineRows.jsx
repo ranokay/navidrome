@@ -5,6 +5,7 @@ import { buildSegmentsFromLine } from './lyricsSegments'
 import {
   TOKEN_ACTIVE_ALPHA,
   TOKEN_FUTURE_ALPHA,
+  TOKEN_SHORT_DURATION_MS,
   TOKEN_WIPE_EDGE_PCT,
   TOKEN_WIPE_SOFT_SPREAD_PCT,
 } from './lyricsKaraokeConstants'
@@ -69,33 +70,36 @@ const buildStaticEmphasisStyle = (token, color) => {
   }
 }
 
-const buildInactiveTokenStyle = (token, rgb) => {
+const buildTokenData = (token, rgb, window, text) => {
   const tonedRGB = getTokenRGB(token, rgb)
-  const color = tokenColor(tonedRGB, TOKEN_FUTURE_ALPHA)
-  return {
-    color,
-    WebkitTextFillColor: color,
-    backgroundImage: 'none',
-    ...buildEmphasisStyle(token),
-  }
-}
-
-const buildTimelineTokenStyle = (token, rgb, window) => {
-  if (!window || window.start == null || window.end == null) {
-    return buildInactiveTokenStyle(token, rgb)
-  }
-  const tonedRGB = getTokenRGB(token, rgb)
-  const doneColor = tokenColor(tonedRGB, TOKEN_ACTIVE_ALPHA)
   const futureColor = tokenColor(tonedRGB, TOKEN_FUTURE_ALPHA)
+  const doneColor = tokenColor(tonedRGB, TOKEN_ACTIVE_ALPHA)
+  const duration =
+    window?.start != null && window?.end != null
+      ? window.end - window.start
+      : null
+  const useCrossfade =
+    (duration != null && duration <= TOKEN_SHORT_DURATION_MS) ||
+    String(text || '').trim().length <= 2
+  const gradient = `linear-gradient(90deg, ${doneColor} 0%, ${doneColor} calc(var(--lyrics-progress) * 100% - ${TOKEN_WIPE_EDGE_PCT}%), ${doneColor} calc(var(--lyrics-progress) * 100%), ${futureColor} calc(var(--lyrics-progress) * 100% + ${TOKEN_WIPE_SOFT_SPREAD_PCT}%), ${futureColor} 100%)`
+
   return {
-    '--lyrics-progress': 0,
-    color: 'transparent',
-    WebkitTextFillColor: 'transparent',
-    backgroundImage: `linear-gradient(90deg, ${doneColor} 0%, ${doneColor} calc(var(--lyrics-progress) * 100% - ${TOKEN_WIPE_EDGE_PCT}%), ${doneColor} calc(var(--lyrics-progress) * 100%), ${futureColor} calc(var(--lyrics-progress) * 100% + ${TOKEN_WIPE_SOFT_SPREAD_PCT}%), ${futureColor} 100%)`,
-    backgroundSize: '100% 100%',
-    backgroundClip: 'text',
-    WebkitBackgroundClip: 'text',
-    ...buildEmphasisStyle(token),
+    style: {
+      '--lyrics-progress': 0,
+      color: futureColor,
+      WebkitTextFillColor: futureColor,
+      backgroundImage: 'none',
+      ...buildEmphasisStyle(token),
+    },
+    presentation: {
+      rgb: tonedRGB,
+      futureAlpha: TOKEN_FUTURE_ALPHA,
+      activeAlpha: TOKEN_ACTIVE_ALPHA,
+      futureColor,
+      doneColor,
+      gradient,
+      useCrossfade,
+    },
   }
 }
 
@@ -104,8 +108,9 @@ const tokenRef = ({
   key,
   lineIndex,
   window,
+  presentation,
 }) => (node) => {
-  registerToken?.(key, { lineIndex, window }, node)
+  registerToken?.(key, { lineIndex, window, presentation }, node)
 }
 
 export const KaraokeLineRow = memo(
@@ -144,6 +149,12 @@ export const KaraokeLineRow = memo(
 
           const window = windows[segment.tokenIndex]
           const key = `${lineIndex}:${rowKey}:${segment.tokenIndex}:main`
+          const tokenData = buildTokenData(
+            segment.token,
+            tokenRGB,
+            window,
+            segment.text,
+          )
           return (
             <span
               key={`token-${idx}-${window?.start ?? 'na'}`}
@@ -155,8 +166,9 @@ export const KaraokeLineRow = memo(
                 key,
                 lineIndex,
                 window,
+                presentation: tokenData.presentation,
               })}
-              style={buildTimelineTokenStyle(segment.token, tokenRGB, window)}
+              style={tokenData.style}
             >
               {segment.text}
             </span>
@@ -373,8 +385,17 @@ export const KaraokeStackedLineRow = memo(
             ? mainWindows[segment.tokenIndex]
             : null
           const mainKey = `${lineIndex}:${rowKey}:${segment.tokenIndex}:main`
+          const mainTokenData = segment.token
+            ? buildTokenData(
+                segment.token,
+                tokenRGB,
+                mainWindow,
+                segment.text,
+              )
+            : null
           const mainText = segment.token ? (
             <span
+              key={`main-${idx}`}
               className={clsx(tokenClassName, classes.stackedMainText)}
               data-testid="lyrics-token"
               data-lyrics-state="future"
@@ -383,17 +404,15 @@ export const KaraokeStackedLineRow = memo(
                 key: mainKey,
                 lineIndex,
                 window: mainWindow,
+                presentation: mainTokenData.presentation,
               })}
-              style={buildTimelineTokenStyle(
-                segment.token,
-                tokenRGB,
-                mainWindow,
-              )}
+              style={mainTokenData.style}
             >
               {segment.text}
             </span>
           ) : (
             <span
+              key={`main-${idx}`}
               className={classes.stackedMainText}
               style={buildStaticEmphasisStyle(segment.token, style?.color)}
             >
@@ -408,6 +427,14 @@ export const KaraokeStackedLineRow = memo(
             ? pronunciationWindows[segment.pronunciationSegment.tokenIndex]
             : mainWindow
           const pronunciationKey = `${lineIndex}:${rowKey}:${segment.tokenIndex}:pronunciation`
+          const pronunciationTokenData = pronunciationWindow
+            ? buildTokenData(
+                pronunciationToken || segment.token,
+                pronunciationRGB,
+                pronunciationWindow,
+                segment.pronunciation,
+              )
+            : null
           return (
             <span
               key={`stacked-${idx}-${mainWindow?.start ?? segment.text}`}
@@ -426,25 +453,20 @@ export const KaraokeStackedLineRow = memo(
                         key: pronunciationKey,
                         lineIndex,
                         window: pronunciationWindow,
+                        presentation: pronunciationTokenData.presentation,
                       })
                     : undefined
                 }
                 style={
-                  pronunciationWindow
-                    ? buildTimelineTokenStyle(
-                        pronunciationToken || segment.token,
-                        pronunciationRGB,
-                        pronunciationWindow,
-                      )
-                    : {
-                        color: pronunciationStyle?.color,
-                        WebkitTextFillColor: pronunciationStyle?.color,
-                        backgroundImage: 'none',
-                        ...buildStaticEmphasisStyle(
-                          pronunciationToken || segment.token,
-                          pronunciationStyle?.color,
-                        ),
-                      }
+                  pronunciationTokenData?.style || {
+                    color: pronunciationStyle?.color,
+                    WebkitTextFillColor: pronunciationStyle?.color,
+                    backgroundImage: 'none',
+                    ...buildStaticEmphasisStyle(
+                      pronunciationToken || segment.token,
+                      pronunciationStyle?.color,
+                    ),
+                  }
                 }
               >
                 {segment.pronunciation}
