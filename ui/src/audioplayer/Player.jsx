@@ -141,6 +141,12 @@ const Player = () => {
   const [context, setContext] = useState(null)
   const [gainNode, setGainNode] = useState(null)
   const { setDesktopLyricsProps } = useLyricsLayout()
+  const lyricsQueueItem = playerState.queue[playerState.savedPlayIndex]
+  const lyricsSong =
+    playerState.current?.song &&
+    playerState.current.trackId !== lyricsQueueItem?.trackId
+      ? playerState.current.song
+      : lyricsQueueItem?.song || playerState.current?.song
   const {
     toolbarLyricsProps,
     desktopLyricsProps,
@@ -148,7 +154,7 @@ const Player = () => {
     useInlineMobileLyrics,
     closeLyrics,
   } = usePlayerLyrics({
-    song: playerState.current?.song,
+    song: lyricsSong,
     isRadio: playerState.current?.isRadio || false,
     audioInstance,
     isDesktop,

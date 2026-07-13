@@ -276,6 +276,10 @@ const normalizeDocument = (lyric, { durationMs, locale }) => {
   )
   const drafts = lyric.line.map((line, index) => {
     const cues = normalizeCues(line, format, offset, locale)
+    const cuesBySourceIndex = []
+    cues.forEach((cue) => {
+      cuesBySourceIndex[cue.sourceIndex] = cue
+    })
     const explicitStart = finiteTime(line?.start)
     const explicitEnd = finiteTime(line?.end)
     const cueStart = cues.find((cue) => cue.start != null)?.start ?? null
@@ -286,6 +290,7 @@ const normalizeDocument = (lyric, { durationMs, locale }) => {
       start: explicitStart == null ? cueStart : explicitStart + offset,
       explicitEnd: explicitEnd == null ? null : explicitEnd + offset,
       cues,
+      cuesBySourceIndex,
       lanes: normalizeLanes(line, cues, agents),
       precision: inferLinePrecision(cues),
       graphemes: segmentGraphemes(String(line?.value || ''), locale),
