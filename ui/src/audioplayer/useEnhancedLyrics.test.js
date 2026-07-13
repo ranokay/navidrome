@@ -2,7 +2,10 @@ import { waitFor } from '@testing-library/react'
 import { renderHook } from '@testing-library/react-hooks'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import subsonic from '../subsonic'
-import useEnhancedLyrics, { emptyLyricLayers } from './useEnhancedLyrics'
+import useEnhancedLyrics, {
+  clearEnhancedLyricsCache,
+  emptyLyricLayers,
+} from './useEnhancedLyrics'
 
 vi.mock('../subsonic', () => ({
   default: {
@@ -37,14 +40,19 @@ const createDeferred = () => {
   return { promise, resolve, reject }
 }
 
+const useLyrics = (trackId, options = {}) =>
+  useEnhancedLyrics({ trackId, ...options })
+
 describe('useEnhancedLyrics', () => {
   beforeEach(() => {
     localStorage.setItem('locale', 'en')
+    clearEnhancedLyricsCache()
     subsonic.getLyricsBySongId.mockReset()
   })
 
   afterEach(() => {
     localStorage.clear()
+    clearEnhancedLyricsCache()
   })
 
   it('fetches enhanced structured lyrics and caches them by track id', async () => {
@@ -53,14 +61,17 @@ describe('useEnhancedLyrics', () => {
       .mockResolvedValueOnce(responseFor('Track two'))
 
     const { result, rerender } = renderHook(
-      ({ trackId }) => useEnhancedLyrics(trackId),
+      ({ trackId }) => useLyrics(trackId),
       { initialProps: { trackId: 'song-1' } },
     )
 
     await waitFor(() =>
       expect(result.current.layers.main?.line[0].value).toBe('Track one'),
     )
-    expect(subsonic.getLyricsBySongId).toHaveBeenCalledWith('song-1')
+    expect(subsonic.getLyricsBySongId).toHaveBeenCalledWith(
+      'song-1',
+      expect.objectContaining({ signal: expect.any(Object) }),
+    )
 
     rerender({ trackId: 'song-2' })
     await waitFor(() =>
@@ -81,7 +92,7 @@ describe('useEnhancedLyrics', () => {
       .mockReturnValueOnce(nextRequest.promise)
 
     const { result, rerender } = renderHook(
-      ({ trackId }) => useEnhancedLyrics(trackId),
+      ({ trackId }) => useLyrics(trackId),
       { initialProps: { trackId: 'song-1' } },
     )
 
@@ -100,8 +111,10 @@ describe('useEnhancedLyrics', () => {
     )
   })
 
-  it('stays empty when disabled', () => {
-    const { result } = renderHook(() => useEnhancedLyrics('song-1', true))
+  it('stays empty when disabled or not requested', () => {
+    const { result } = renderHook(() =>
+      useLyrics('song-1', { disabled: true, requested: false }),
+    )
 
     expect(result.current.layers).toBe(emptyLyricLayers)
     expect(result.current.loading).toBe(false)
@@ -115,7 +128,7 @@ describe('useEnhancedLyrics', () => {
       .mockResolvedValueOnce(responseFor('Recovered lyrics'))
 
     const { result, rerender } = renderHook(
-      ({ trackId }) => useEnhancedLyrics(trackId),
+      ({ trackId }) => useLyrics(trackId),
       { initialProps: { trackId: 'song-error' } },
     )
 
@@ -140,7 +153,7 @@ describe('useEnhancedLyrics', () => {
       .mockResolvedValueOnce(responseFor('Japanese lyrics', 'ja'))
 
     const { result, rerender } = renderHook(
-      ({ trackId }) => useEnhancedLyrics(trackId),
+      ({ trackId }) => useLyrics(trackId),
       { initialProps: { trackId: 'song-1' } },
     )
 
@@ -153,6 +166,26 @@ describe('useEnhancedLyrics', () => {
 
     await waitFor(() =>
       expect(result.current.layers.main?.line[0].value).toBe('Japanese lyrics'),
+    )
+    expect(subsonic.getLyricsBySongId).toHaveBeenCalledTimes(2)
+  })
+
+  it('invalidates cache entries when the track update identity changes', async () => {
+    subsonic.getLyricsBySongId
+      .mockResolvedValueOnce(responseFor('Old lyrics'))
+      .mockResolvedValueOnce(responseFor('Updated lyrics'))
+
+    const { result, rerender } = renderHook(
+      ({ updatedAt }) => useLyrics('song-1', { updatedAt }),
+      { initialProps: { updatedAt: 'old' } },
+    )
+
+    await waitFor(() =>
+      expect(result.current.layers.main?.line[0].value).toBe('Old lyrics'),
+    )
+    rerender({ updatedAt: 'new' })
+    await waitFor(() =>
+      expect(result.current.layers.main?.line[0].value).toBe('Updated lyrics'),
     )
     expect(subsonic.getLyricsBySongId).toHaveBeenCalledTimes(2)
   })
