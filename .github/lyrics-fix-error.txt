@@ -1,5 +1,5 @@
 Traceback (most recent call last):
-  File "<stdin>", line 11, in <module>
-  File "embedded-lyrics-fix.py", line 1
-    from pathlib import Path
-IndentationError: unexpected indent
+  File "<stdin>", line 13, in <module>
+  File "embedded-lyrics-fix.py", line 342, in <module>
+  File "embedded-lyrics-fix.py", line 13, in replace_once
+RuntimeError: force seek release fade: expected one match, found 0
