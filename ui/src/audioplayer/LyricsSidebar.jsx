@@ -25,7 +25,6 @@ const useStyles = makeStyles((theme) => ({
     right: 0,
     bottom: 80,
     minHeight: 0,
-    width: (props) => props.width,
     minWidth: LYRICS_SIDEBAR_MIN_WIDTH,
     maxWidth: LYRICS_SIDEBAR_MAX_WIDTH,
     display: 'flex',
@@ -197,7 +196,7 @@ const LyricsSidebar = ({
     LYRICS_SIDEBAR_TRANSITION_MS,
   )
   const [isResizing, setIsResizing] = useState(false)
-  const classes = useStyles({ width })
+  const classes = useStyles()
 
   useEffect(() => {
     widthRef.current = width
@@ -219,15 +218,26 @@ const LyricsSidebar = ({
     }
   }, [entered])
 
-  const updateWidth = useCallback((next, { persist = false } = {}) => {
+  const applyWidth = useCallback((next) => {
     const resolvedWidth = clampSidebarWidth(
       typeof next === 'function' ? next(widthRef.current) : next,
     )
     widthRef.current = resolvedWidth
-    setWidth(resolvedWidth)
+    if (sidebarRef.current) {
+      sidebarRef.current.style.width = `${resolvedWidth}px`
+    }
     notifySidebarWidthChange(resolvedWidth)
-    if (persist) saveSidebarWidth(resolvedWidth)
+    return resolvedWidth
   }, [])
+
+  const updateWidth = useCallback(
+    (next, { persist = false } = {}) => {
+      const resolvedWidth = applyWidth(next)
+      setWidth(resolvedWidth)
+      if (persist) saveSidebarWidth(resolvedWidth)
+    },
+    [applyWidth],
+  )
 
   const handleResizePointerDown = useCallback(
     (event) => {
@@ -246,8 +256,7 @@ const LyricsSidebar = ({
       setIsResizing(true)
 
       const handlePointerMove = (moveEvent) => {
-        latestWidth = clampSidebarWidth(startWidth + startX - moveEvent.clientX)
-        updateWidth(latestWidth)
+        latestWidth = applyWidth(startWidth + startX - moveEvent.clientX)
       }
 
       const cleanupResize = ({ persist = false } = {}) => {
@@ -268,6 +277,7 @@ const LyricsSidebar = ({
             // Ignore stale pointer capture state.
           }
         }
+        setWidth(latestWidth)
         if (persist) saveSidebarWidth(latestWidth)
         setIsResizing(false)
         if (resizeCleanupRef.current === cleanupResize) {
@@ -291,7 +301,7 @@ const LyricsSidebar = ({
         }
       }
     },
-    [updateWidth],
+    [applyWidth],
   )
 
   const handleResizeKeyDown = useCallback(
