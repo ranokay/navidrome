@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   KARAOKE_CLOCK_DRIFT_RESET_MS,
   KARAOKE_CLOCK_RESET_THRESHOLD_MS,
@@ -45,6 +52,13 @@ const setTokenPresentation = (record, time) => {
   setProgress(record, progress)
 }
 
+const canListenToMedia = (audio) =>
+  Boolean(
+    audio &&
+      typeof audio.addEventListener === 'function' &&
+      typeof audio.removeEventListener === 'function',
+  )
+
 const useLyricsTimeline = ({
   lines,
   audioInstance,
@@ -76,6 +90,8 @@ const useLyricsTimeline = ({
     if (!node) return
     node.dataset.active = phase === 'active' ? 'true' : 'false'
     node.dataset.lifecycle = phase
+    node.dataset.highlightActive =
+      phase === 'active' || phase === 'release' ? 'true' : 'false'
   }, [])
 
   const resetLineTokens = useCallback((lineIndex, state = 'future') => {
@@ -110,7 +126,10 @@ const useLyricsTimeline = ({
 
   const apply = useCallback(
     (time, forceSeek = false) => {
-      const current = Number.isFinite(Number(time)) ? Math.max(0, Number(time)) : 0
+      const current = Number.isFinite(Number(time))
+        ? Math.max(0, Number(time))
+        : 0
+      const lead = reducedMotion ? 0 : KARAOKE_HIGHLIGHT_LEAD_MS
       lastAppliedTimeRef.current = current
       const cursor = cursorRef.current
       const previousIndexes = cursor.lastIndexes
@@ -119,15 +138,20 @@ const useLyricsTimeline = ({
       if (forceSeek) {
         releaseIndexesRef.current.clear()
         timeline.windows.forEach((window) => {
-          if (!window.valid) {
+          if (!window.valid || current < window.start) {
             setLineState(window.lineIndex, 'idle')
             resetLineTokens(window.lineIndex, 'future')
-          } else if (current < window.start) {
-            setLineState(window.lineIndex, 'idle')
-            resetLineTokens(window.lineIndex, 'future')
-          } else if (current >= window.end) {
-            setLineState(window.lineIndex, 'idle')
-            resetLineTokens(window.lineIndex, 'inactive-past')
+            return
+          }
+          if (current >= window.end) {
+            if (current < window.end + KARAOKE_LINE_RELEASE_MS) {
+              releaseIndexesRef.current.add(window.lineIndex)
+              setLineState(window.lineIndex, 'release')
+              updateLineTokens(window.lineIndex, window.end + lead)
+            } else {
+              setLineState(window.lineIndex, 'idle')
+              resetLineTokens(window.lineIndex, 'inactive-past')
+            }
           }
         })
       } else if (result.changed) {
@@ -141,6 +165,7 @@ const useLyricsTimeline = ({
           ) {
             releaseIndexesRef.current.add(lineIndex)
             setLineState(lineIndex, 'release')
+            updateLineTokens(lineIndex, window.end + lead)
           } else {
             setLineState(lineIndex, 'idle')
             resetLineTokens(lineIndex, 'inactive-past')
@@ -151,10 +176,7 @@ const useLyricsTimeline = ({
       result.indexes.forEach((lineIndex) => {
         releaseIndexesRef.current.delete(lineIndex)
         setLineState(lineIndex, 'active')
-        updateLineTokens(
-          lineIndex,
-          current + (reducedMotion ? 0 : KARAOKE_HIGHLIGHT_LEAD_MS),
-        )
+        updateLineTokens(lineIndex, current + lead)
       })
 
       releaseIndexesRef.current.forEach((lineIndex) => {
@@ -197,60 +219,82 @@ const useLyricsTimeline = ({
       lineNodesRef.current.set(lineIndex, node)
       const window = timeline.windows[lineIndex]
       const time = lastAppliedTimeRef.current
-      if (cursorRef.current.active.has(lineIndex)) setLineState(lineIndex, 'active')
-      else if (
+      if (cursorRef.current.active.has(lineIndex)) {
+        setLineState(lineIndex, 'active')
+      } else if (
         window?.valid &&
         time >= window.end &&
         time < window.end + KARAOKE_LINE_RELEASE_MS
       ) {
         setLineState(lineIndex, 'release')
-      } else setLineState(lineIndex, 'idle')
+      } else {
+        setLineState(lineIndex, 'idle')
+      }
     },
     [setLineState, timeline.windows],
   )
 
-  const registerToken = useCallback((key, descriptor, node) => {
-    const existing = tokenRecordsRef.current.get(key)
-    if (!node) {
-      if (existing) {
-        tokenRecordsRef.current.delete(key)
-        const keys = lineTokenKeysRef.current.get(existing.lineIndex)
-        keys?.delete(key)
-        if (keys?.size === 0) lineTokenKeysRef.current.delete(existing.lineIndex)
+  const registerToken = useCallback(
+    (key, descriptor, node) => {
+      const existing = tokenRecordsRef.current.get(key)
+      if (!node) {
+        if (existing) {
+          tokenRecordsRef.current.delete(key)
+          const keys = lineTokenKeysRef.current.get(existing.lineIndex)
+          keys?.delete(key)
+          if (keys?.size === 0) {
+            lineTokenKeysRef.current.delete(existing.lineIndex)
+          }
+        }
+        return
       }
-      return
-    }
 
-    const record = {
-      key,
-      node,
-      lineIndex: descriptor.lineIndex,
-      window: descriptor.window,
-      progress: null,
-      state: null,
-    }
-    tokenRecordsRef.current.set(key, record)
-    if (!lineTokenKeysRef.current.has(record.lineIndex)) {
-      lineTokenKeysRef.current.set(record.lineIndex, new Set())
-    }
-    lineTokenKeysRef.current.get(record.lineIndex).add(key)
+      const record = {
+        key,
+        node,
+        lineIndex: descriptor.lineIndex,
+        window: descriptor.window,
+        progress: null,
+        state: null,
+      }
+      tokenRecordsRef.current.set(key, record)
+      if (!lineTokenKeysRef.current.has(record.lineIndex)) {
+        lineTokenKeysRef.current.set(record.lineIndex, new Set())
+      }
+      lineTokenKeysRef.current.get(record.lineIndex).add(key)
 
-    if (cursorRef.current.active.has(record.lineIndex)) {
-      setTokenPresentation(
-        record,
-        lastAppliedTimeRef.current +
-          (reducedMotion ? 0 : KARAOKE_HIGHLIGHT_LEAD_MS),
-      )
-    } else {
-      const lineWindow = timeline.windows[record.lineIndex]
-      resetToken(
-        record,
-        lineWindow?.valid && lastAppliedTimeRef.current >= lineWindow.end
-          ? 'inactive-past'
-          : 'future',
-      )
-    }
-  }, [reducedMotion, timeline.windows])
+      if (cursorRef.current.active.has(record.lineIndex)) {
+        setTokenPresentation(
+          record,
+          lastAppliedTimeRef.current +
+            (reducedMotion ? 0 : KARAOKE_HIGHLIGHT_LEAD_MS),
+        )
+      } else {
+        const lineWindow = timeline.windows[record.lineIndex]
+        if (
+          lineWindow?.valid &&
+          lastAppliedTimeRef.current >= lineWindow.end &&
+          lastAppliedTimeRef.current <
+            lineWindow.end + KARAOKE_LINE_RELEASE_MS
+        ) {
+          setTokenPresentation(
+            record,
+            lineWindow.end +
+              (reducedMotion ? 0 : KARAOKE_HIGHLIGHT_LEAD_MS),
+          )
+        } else {
+          resetToken(
+            record,
+            lineWindow?.valid &&
+              lastAppliedTimeRef.current >= lineWindow.end
+              ? 'inactive-past'
+              : 'future',
+          )
+        }
+      }
+    },
+    [reducedMotion, timeline.windows],
+  )
 
   const getLineNode = useCallback(
     (lineIndex) => lineNodesRef.current.get(lineIndex) || null,
@@ -261,6 +305,7 @@ const useLyricsTimeline = ({
     lineNodesRef.current.forEach((node) => {
       node.dataset.active = 'false'
       node.dataset.lifecycle = 'idle'
+      node.dataset.highlightActive = 'false'
     })
     tokenRecordsRef.current.forEach((record) => resetToken(record))
     cursorRef.current = new LyricTimelineCursor(timeline)
@@ -273,7 +318,13 @@ const useLyricsTimeline = ({
   }, [apply, audioInstance, timeline])
 
   useEffect(() => {
-    if (!audioInstance || !timeline.events.length) return undefined
+    if (
+      !audioInstance ||
+      !timeline.events.length ||
+      !canListenToMedia(audioInstance)
+    ) {
+      return undefined
+    }
     const seek = () => apply(mediaTimeMs(audioInstance), true)
     audioInstance.addEventListener('seeking', seek)
     audioInstance.addEventListener('seeked', seek)
@@ -287,6 +338,11 @@ const useLyricsTimeline = ({
 
   useEffect(() => {
     if (!audioInstance || !timeline.events.length || !visible) return undefined
+    if (!canListenToMedia(audioInstance)) {
+      apply(mediaTimeMs(audioInstance), true)
+      return undefined
+    }
+
     let cancelled = false
     let anchorAudioMs = mediaTimeMs(audioInstance)
     let anchorPerfMs = performance.now()
@@ -320,9 +376,8 @@ const useLyricsTimeline = ({
       }
       const predicted = anchorAudioMs + (now - anchorPerfMs) * rate
       const drift = observed - predicted
-      let current = Math.abs(drift) > KARAOKE_CLOCK_DRIFT_RESET_MS
-        ? observed
-        : predicted
+      let current =
+        Math.abs(drift) > KARAOKE_CLOCK_DRIFT_RESET_MS ? observed : predicted
       if (Math.abs(drift) > KARAOKE_CLOCK_DRIFT_RESET_MS) {
         anchorAudioMs = observed
         anchorPerfMs = now
@@ -332,7 +387,10 @@ const useLyricsTimeline = ({
         current = observed
         anchorAudioMs = observed
         anchorPerfMs = now
-      } else if (backwards > 0 && backwards <= KARAOKE_MONOTONIC_JITTER_MS) {
+      } else if (
+        backwards > 0 &&
+        backwards <= KARAOKE_MONOTONIC_JITTER_MS
+      ) {
         current = lastFrameTime
       }
       lastFrameTime = Math.max(0, current)
@@ -357,7 +415,9 @@ const useLyricsTimeline = ({
         frameRef.current ||
         audioInstance.paused ||
         window.document.visibilityState !== 'visible'
-      ) return
+      ) {
+        return
+      }
       resetAnchor()
       frameRef.current = window.requestAnimationFrame(tick)
     }
