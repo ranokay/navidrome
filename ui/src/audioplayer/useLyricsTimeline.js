@@ -25,9 +25,19 @@ const mediaTimeMs = (audio) => {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 0
 }
 
+const mediaDurationMs = (audio) => {
+  const seconds = Number(audio?.duration)
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null
+}
+
 const sameIndexes = (left, right) =>
   left.length === right.length &&
   left.every((value, index) => value === right[index])
+
+const rgba = (rgb, alpha) => {
+  const [r, g, b] = rgb || [255, 255, 255]
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
 
 const setProgress = (record, value) => {
   const next = Math.max(0, Math.min(1, value))
@@ -36,20 +46,64 @@ const setProgress = (record, value) => {
   record.node.style.setProperty('--lyrics-progress', String(next))
 }
 
-const resetToken = (record, state = 'future') => {
+const setSolidTokenColor = (record, color) => {
+  record.node.style.color = color
+  record.node.style.webkitTextFillColor = color
+  record.node.style.backgroundImage = 'none'
+  record.node.style.backgroundClip = ''
+  record.node.style.webkitBackgroundClip = ''
+}
+
+const setGradientTokenColor = (record) => {
+  record.node.style.color = 'transparent'
+  record.node.style.webkitTextFillColor = 'transparent'
+  record.node.style.backgroundImage = record.presentation.gradient
+  record.node.style.backgroundSize = '100% 100%'
+  record.node.style.backgroundClip = 'text'
+  record.node.style.webkitBackgroundClip = 'text'
+}
+
+const applyTokenState = (record, state, progress = 0) => {
   record.state = state
   record.node.dataset.lyricsState = state
+  const presentation = record.presentation || {}
+
+  if (state === 'active') {
+    if (presentation.useCrossfade) {
+      const alpha =
+        (presentation.futureAlpha ?? 0.34) +
+        ((presentation.activeAlpha ?? 1) -
+          (presentation.futureAlpha ?? 0.34)) *
+          progress
+      setSolidTokenColor(record, rgba(presentation.rgb, alpha))
+      setProgress(record, progress)
+      return
+    }
+    setGradientTokenColor(record)
+    setProgress(record, progress)
+    return
+  }
+
+  if (state === 'completed') {
+    setSolidTokenColor(record, presentation.doneColor || 'currentColor')
+    setProgress(record, 1)
+    return
+  }
+
+  setSolidTokenColor(record, presentation.futureColor || 'currentColor')
   setProgress(record, 0)
+}
+
+const resetToken = (record, state = 'future') => {
+  applyTokenState(record, state, 0)
 }
 
 const setTokenPresentation = (record, time) => {
   const progress = tokenProgressAt(record.window, time)
   const state = progress <= 0 ? 'future' : progress >= 1 ? 'completed' : 'active'
-  if (record.state !== state) {
-    record.state = state
-    record.node.dataset.lyricsState = state
+  if (record.state !== state || state === 'active') {
+    applyTokenState(record, state, progress)
   }
-  setProgress(record, progress)
 }
 
 const canListenToMedia = (audio) =>
@@ -65,10 +119,22 @@ const useLyricsTimeline = ({
   visible,
   reducedMotion,
 }) => {
-  const durationMs = useMemo(() => {
-    const duration = Number(audioInstance?.duration)
-    return Number.isFinite(duration) && duration > 0 ? duration * 1000 : null
+  const [durationMs, setDurationMs] = useState(() =>
+    mediaDurationMs(audioInstance),
+  )
+
+  useEffect(() => {
+    const updateDuration = () => setDurationMs(mediaDurationMs(audioInstance))
+    updateDuration()
+    if (!canListenToMedia(audioInstance)) return undefined
+    audioInstance.addEventListener('loadedmetadata', updateDuration)
+    audioInstance.addEventListener('durationchange', updateDuration)
+    return () => {
+      audioInstance.removeEventListener('loadedmetadata', updateDuration)
+      audioInstance.removeEventListener('durationchange', updateDuration)
+    }
   }, [audioInstance])
+
   const timeline = useMemo(
     () => buildLyricsTimeline(lines, { durationMs }),
     [durationMs, lines],
@@ -254,6 +320,7 @@ const useLyricsTimeline = ({
         node,
         lineIndex: descriptor.lineIndex,
         window: descriptor.window,
+        presentation: descriptor.presentation,
         progress: null,
         state: null,
       }
@@ -328,11 +395,9 @@ const useLyricsTimeline = ({
     const seek = () => apply(mediaTimeMs(audioInstance), true)
     audioInstance.addEventListener('seeking', seek)
     audioInstance.addEventListener('seeked', seek)
-    audioInstance.addEventListener('loadedmetadata', seek)
     return () => {
       audioInstance.removeEventListener('seeking', seek)
       audioInstance.removeEventListener('seeked', seek)
-      audioInstance.removeEventListener('loadedmetadata', seek)
     }
   }, [apply, audioInstance, timeline.events.length])
 
