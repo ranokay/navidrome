@@ -5,7 +5,6 @@ import { buildSegmentsFromLine } from './lyricsSegments'
 import {
   TOKEN_ACTIVE_ALPHA,
   TOKEN_FUTURE_ALPHA,
-  TOKEN_SHORT_DURATION_MS,
   TOKEN_WIPE_EDGE_PCT,
   TOKEN_WIPE_SOFT_SPREAD_PCT,
 } from './lyricsKaraokeConstants'
@@ -70,22 +69,25 @@ const buildStaticEmphasisStyle = (token, color) => {
   }
 }
 
-const buildTokenData = (token, rgb, window, text) => {
+const buildTokenData = (token, rgb) => {
   const tonedRGB = getTokenRGB(token, rgb)
   const futureColor = tokenColor(tonedRGB, TOKEN_FUTURE_ALPHA)
   const doneColor = tokenColor(tonedRGB, TOKEN_ACTIVE_ALPHA)
-  const duration =
-    window?.start != null && window?.end != null
-      ? window.end - window.start
-      : null
-  const useCrossfade =
-    (duration != null && duration <= TOKEN_SHORT_DURATION_MS) ||
-    String(text || '').trim().length <= 2
-  const gradient = `linear-gradient(90deg, ${doneColor} 0%, ${doneColor} calc(var(--lyrics-progress) * 100% - ${TOKEN_WIPE_EDGE_PCT}%), ${doneColor} calc(var(--lyrics-progress) * 100%), ${futureColor} calc(var(--lyrics-progress) * 100% + ${TOKEN_WIPE_SOFT_SPREAD_PCT}%), ${futureColor} 100%)`
+  const softColor = tokenColor(
+    tonedRGB,
+    TOKEN_FUTURE_ALPHA + (TOKEN_ACTIVE_ALPHA - TOKEN_FUTURE_ALPHA) * 0.58,
+  )
+  const sweepRange = 100 + TOKEN_WIPE_SOFT_SPREAD_PCT
+  const activeStop = `calc(var(--lyrics-progress) * ${sweepRange}% - ${TOKEN_WIPE_SOFT_SPREAD_PCT}%)`
+  const softStop = `calc(var(--lyrics-progress) * ${sweepRange}% - ${TOKEN_WIPE_EDGE_PCT}%)`
+  const futureStop = `calc(var(--lyrics-progress) * ${sweepRange}%)`
+  const gradient = `linear-gradient(90deg, ${doneColor} 0%, ${doneColor} ${activeStop}, ${softColor} ${softStop}, ${futureColor} ${futureStop}, ${futureColor} 100%)`
 
   return {
     style: {
       '--lyrics-progress': 0,
+      transition:
+        'opacity 220ms cubic-bezier(0.22, 1, 0.36, 1), color 220ms cubic-bezier(0.22, 1, 0.36, 1), -webkit-text-fill-color 220ms cubic-bezier(0.22, 1, 0.36, 1)',
       color: futureColor,
       WebkitTextFillColor: futureColor,
       backgroundImage: 'none',
@@ -98,7 +100,6 @@ const buildTokenData = (token, rgb, window, text) => {
       futureColor,
       doneColor,
       gradient,
-      useCrossfade,
     },
   }
 }

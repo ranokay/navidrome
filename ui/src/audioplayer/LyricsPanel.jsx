@@ -14,7 +14,6 @@ import {
   buildKaraokeLines,
   hasStructuredLyricContent,
   hasUsableKaraokeTiming,
-  resolveLayerLineForMain,
 } from './lyrics'
 import { KaraokeLineRow, KaraokeStackedLineRow } from './LyricsLineRows'
 import {
@@ -101,11 +100,20 @@ const useStyles = makeStyles((theme) => ({
   lineGroup: {
     width: '100%',
     borderRadius: theme.shape.borderRadius,
+    transform: 'translateY(0)',
+    transition: `transform ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
+    '&[data-highlight-active="true"]': {
+      transform: 'translateY(-2px)',
+    },
     '&[data-active="true"] $line, &[data-lifecycle="release"] $line': {
       color: 'var(--lyrics-active-color)',
     },
     '&[data-active="true"] $auxLine, &[data-lifecycle="release"] $auxLine': {
       color: 'var(--lyrics-active-color)',
+    },
+    '@media (prefers-reduced-motion: reduce)': {
+      transition: 'none',
+      transform: 'none',
     },
   },
   line: {
@@ -203,13 +211,89 @@ const useStyles = makeStyles((theme) => ({
 }))
 
 const normalizeLineText = (value) =>
-  (value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  String(value || '')
+    .normalize('NFKC')
+    .toLocaleLowerCase()
+    .replace(/[\p{P}\p{S}\s]+/gu, '')
 
 const shouldShowAuxLine = (mainLine, auxLine) =>
   Boolean(
     auxLine?.value &&
     normalizeLineText(auxLine.value) !== normalizeLineText(mainLine?.value),
   )
+
+const finiteLineTime = (value) => {
+  if (value == null || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+const getLayerMatchWindow = (lines, index) => {
+  const line = lines[index]
+  if (!line) return { start: null, end: null }
+  return {
+    start: finiteLineTime(line.start),
+    end: finiteLineTime(line.end) ?? finiteLineTime(lines[index + 1]?.start),
+  }
+}
+
+const buildUniqueLayerMap = (mainLines, layerLines) => {
+  if (!mainLines.length || !layerLines.length) return {}
+
+  const candidates = []
+  for (let layerIndex = 0; layerIndex < layerLines.length; layerIndex += 1) {
+    const layerWindow = getLayerMatchWindow(layerLines, layerIndex)
+    for (let mainIndex = 0; mainIndex < mainLines.length; mainIndex += 1) {
+      const mainWindow = getLayerMatchWindow(mainLines, mainIndex)
+      let score = null
+
+      if (layerWindow.start != null && mainWindow.start != null) {
+        const mainEnd = mainWindow.end ?? mainWindow.start
+        const layerEnd = layerWindow.end ?? layerWindow.start
+        const overlap =
+          Math.min(mainEnd, layerEnd) -
+          Math.max(mainWindow.start, layerWindow.start)
+        const mainDuration = Math.max(0, mainEnd - mainWindow.start)
+        const maxDelta = Math.max(550, Math.min(1400, mainDuration + 420))
+        const startDelta = Math.abs(layerWindow.start - mainWindow.start)
+        if (overlap < 0 && startDelta > maxDelta) continue
+        score =
+          startDelta +
+          Math.abs(layerIndex - mainIndex) * 30 +
+          (overlap < 0 ? 200 : 0)
+      } else if (layerIndex === mainIndex) {
+        score = 2000
+      }
+
+      if (score != null) {
+        candidates.push({ layerIndex, mainIndex, score })
+      }
+    }
+  }
+
+  candidates.sort(
+    (left, right) =>
+      left.score - right.score ||
+      left.layerIndex - right.layerIndex ||
+      left.mainIndex - right.mainIndex,
+  )
+
+  const usedLayers = new Set()
+  const usedMainLines = new Set()
+  const result = {}
+  for (const candidate of candidates) {
+    if (
+      usedLayers.has(candidate.layerIndex) ||
+      usedMainLines.has(candidate.mainIndex)
+    ) {
+      continue
+    }
+    usedLayers.add(candidate.layerIndex)
+    usedMainLines.add(candidate.mainIndex)
+    result[candidate.mainIndex] = layerLines[candidate.layerIndex]
+  }
+  return result
+}
 
 const getLineLanes = (line) =>
   Array.isArray(line?.lanes) && line.lanes.length > 0 ? line.lanes : [line]
@@ -295,22 +379,12 @@ const LyricsPanel = ({
 
   const trByMainIndex = useMemo(() => {
     if (!showTranslation || translationLines.length === 0) return {}
-    const map = {}
-    for (let i = 0; i < mainLines.length; i += 1) {
-      const { line } = resolveLayerLineForMain(mainLines, translationLines, i)
-      if (line) map[i] = line
-    }
-    return map
+    return buildUniqueLayerMap(mainLines, translationLines)
   }, [mainLines, translationLines, showTranslation])
 
   const prByMainIndex = useMemo(() => {
     if (!showPronunciation || pronunciationLines.length === 0) return {}
-    const map = {}
-    for (let i = 0; i < mainLines.length; i += 1) {
-      const { line } = resolveLayerLineForMain(mainLines, pronunciationLines, i)
-      if (line) map[i] = line
-    }
-    return map
+    return buildUniqueLayerMap(mainLines, pronunciationLines)
   }, [mainLines, pronunciationLines, showPronunciation])
 
   const colors = useMemo(

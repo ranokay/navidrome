@@ -1,9 +1,0 @@
-Traceback (most recent call last):
-  File "/home/runner/work/navidrome/navidrome/.github/scripts/apply-lyrics-rendering-fix.py", line 145, in <module>
-    main()
-  File "/home/runner/work/navidrome/navidrome/.github/scripts/apply-lyrics-rendering-fix.py", line 138, in main
-    script = remove_fragile_sections(extract_prepared_script())
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/navidrome/navidrome/.github/scripts/apply-lyrics-rendering-fix.py", line 34, in remove_fragile_sections
-    raise RuntimeError(
-RuntimeError: Expected one timeline and one test patch, removed 1 and 0

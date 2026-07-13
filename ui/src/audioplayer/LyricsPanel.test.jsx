@@ -131,6 +131,30 @@ describe('<LyricsPanel />', () => {
     expect(screen.getByText('translation line')).toBeInTheDocument()
   })
 
+  it('renders each translation line under only its closest main line', () => {
+    renderPanel({
+      mainLyric: {
+        synced: true,
+        line: [
+          { start: 0, end: 1000, value: 'First main line' },
+          { start: 1000, end: 2000, value: 'Closest main line' },
+          { start: 2000, end: 3000, value: 'Later main line' },
+        ],
+      },
+      translationLyric: {
+        synced: true,
+        line: [{ start: 1100, end: 2800, value: 'One translated line' }],
+      },
+      showTranslation: true,
+    })
+
+    const translations = screen.getAllByText('One translated line')
+    expect(translations).toHaveLength(1)
+    expect(
+      translations[0].closest('[data-testid="lyrics-line-group"]'),
+    ).toHaveTextContent('Closest main line')
+  })
+
   it('renders line-level pronunciation without inventing word timing', () => {
     renderPanel({
       mainLyric: {
@@ -208,7 +232,7 @@ describe('<LyricsPanel />', () => {
     expect(second.style.backgroundImage).toBe('none')
   })
 
-  it('crossfades short cues without adding a gradient paint', () => {
+  it('uses a soft gradient wipe for short fast cues', () => {
     renderPanel({
       mainLyric: {
         synced: true,
@@ -228,8 +252,8 @@ describe('<LyricsPanel />', () => {
 
     const token = screen.getByTestId('lyrics-token')
     expect(token).toHaveAttribute('data-lyrics-state', 'active')
-    expect(token.style.backgroundImage).toBe('none')
-    expect(token.style.color).toMatch(/^rgba\(17, 17, 17,/)
+    expect(token.style.backgroundImage).toContain('linear-gradient')
+    expect(token.style.color).toBe('transparent')
   })
 
   it('keeps completed tokens during release then clears stale state', () => {
