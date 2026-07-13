@@ -23,19 +23,14 @@ def remove_fragile_sections(script: str) -> str:
         count=1,
         flags=re.S,
     )
-    script, removed_tests = re.subn(
-        r"\n\s*test_path = 'ui/src/audioplayer/LyricsPanel\.test\.jsx'.*?\n\s*write\(test_path, tests\)\n",
-        '\n',
-        script,
-        count=1,
-        flags=re.S,
-    )
-    if removed_timeline != 1 or removed_tests != 1:
+    test_marker = "\ntest_path = 'ui/src/audioplayer/LyricsPanel.test.jsx'"
+    test_start = script.find(test_marker)
+    if removed_timeline != 1 or test_start < 0:
         raise RuntimeError(
-            'Expected one timeline and one test patch, '
-            f'removed {removed_timeline} and {removed_tests}'
+            'Expected one timeline patch and a trailing test patch, '
+            f'found {removed_timeline} and test offset {test_start}'
         )
-    return script
+    return script[:test_start] + '\n'
 
 
 def patch_token_rendering() -> None:
