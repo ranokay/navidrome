@@ -189,4 +189,45 @@ describe('useEnhancedLyrics', () => {
     )
     expect(subsonic.getLyricsBySongId).toHaveBeenCalledTimes(2)
   })
+
+  it('deduplicates concurrent consumers and aborts only after the last one leaves', () => {
+    let signal
+    subsonic.getLyricsBySongId.mockImplementation((_trackId, options) => {
+      signal = options.signal
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'))
+        })
+      })
+    })
+
+    const first = renderHook(() => useLyrics('shared-song'))
+    const second = renderHook(() => useLyrics('shared-song'))
+
+    expect(subsonic.getLyricsBySongId).toHaveBeenCalledTimes(1)
+    first.unmount()
+    expect(signal.aborted).toBe(false)
+    second.unmount()
+    expect(signal.aborted).toBe(true)
+  })
+
+  it('starts a fresh request after an abandoned request is aborted', () => {
+    const signals = []
+    subsonic.getLyricsBySongId.mockImplementation((_trackId, options) => {
+      signals.push(options.signal)
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'))
+        })
+      })
+    })
+
+    const first = renderHook(() => useLyrics('retry-song'))
+    first.unmount()
+    expect(signals[0].aborted).toBe(true)
+
+    const second = renderHook(() => useLyrics('retry-song'))
+    expect(subsonic.getLyricsBySongId).toHaveBeenCalledTimes(2)
+    second.unmount()
+  })
 })
