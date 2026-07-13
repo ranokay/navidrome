@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import LyricsPanel from './LyricsPanel'
 import MobileKaraokeLyricsPortal from './MobileKaraokeLyricsPortal'
 import { hasStructuredLyricContent } from './lyrics'
@@ -8,15 +8,32 @@ import {
 } from './lyricsSidebarState'
 import useEnhancedLyrics from './useEnhancedLyrics'
 
-const usePlayerLyrics = ({ trackId, isRadio, audioInstance, isDesktop }) => {
+const usePlayerLyrics = ({
+  trackId,
+  trackUpdatedAt,
+  isRadio,
+  audioInstance,
+  isDesktop,
+}) => {
   const [lyricsVisiblePreference, setLyricsVisiblePreference] = useState(false)
+  const [lyricsRequested, setLyricsRequested] = useState(false)
   const [translationPreference, setTranslationPreference] = useState(null)
   const [pronunciationPreference, setPronunciationPreference] = useState(null)
+
+  useEffect(() => {
+    setLyricsRequested(lyricsVisiblePreference)
+  }, [trackId]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const {
     layers: lyricLayers,
     loading: lyricsLoading,
     error: lyricsError,
-  } = useEnhancedLyrics(trackId, isRadio)
+  } = useEnhancedLyrics({
+    trackId,
+    updatedAt: trackUpdatedAt,
+    disabled: isRadio,
+    requested: lyricsRequested || lyricsVisiblePreference,
+  })
 
   const hasMainLyric = hasStructuredLyricContent(lyricLayers.main)
   const hasTranslationLyric = hasStructuredLyricContent(lyricLayers.translation)
@@ -31,13 +48,16 @@ const usePlayerLyrics = ({ trackId, isRadio, audioInstance, isDesktop }) => {
       hasTranslationLyric,
       hasPronunciationLyric,
     })
-  const lyricsToggleDisabled =
-    (lyricsLoading || !hasMainLyric) && !lyricsVisiblePreference
-  const useInlineMobileLyrics = lyricsVisible && hasMainLyric && !isDesktop
+  const lyricsToggleDisabled = isRadio || (!trackId && !lyricsVisiblePreference)
+  const useInlineMobileLyrics = lyricsVisible && !isDesktop
 
   const toggleLyrics = useCallback(() => {
-    setLyricsVisiblePreference((current) => (current ? false : hasMainLyric))
-  }, [hasMainLyric])
+    setLyricsVisiblePreference((current) => {
+      const next = !current
+      if (next) setLyricsRequested(true)
+      return next
+    })
+  }, [])
 
   const closeLyrics = useCallback(() => {
     setLyricsVisiblePreference(false)
