@@ -39,12 +39,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr view 7 --json body --jq .body > /tmp/original-body.md
+          sed -E 's/\x1B\[[0-9;]*[mK]//g' ui/test-output.log > /tmp/clean.log
+          awk '/Failed Tests|FAIL  / { found = 1 } found { print }' /tmp/clean.log > /tmp/failures.log
+          if [ ! -s /tmp/failures.log ]; then
+            tail -n 100 /tmp/clean.log > /tmp/failures.log
+          fi
+          gh pr view 7 --json body --jq .body > /tmp/current-body.md
+          sed '/<!-- ui-test-debug -->/,/<!-- \/ui-test-debug -->/d' /tmp/current-body.md > /tmp/original-body.md
           {
             echo '<!-- ui-test-debug -->'
             echo '## Temporary UI test diagnostics'
             echo '```text'
-            tail -n 300 ui/test-output.log
+            tail -n 160 /tmp/failures.log
             echo '```'
             echo '<!-- /ui-test-debug -->'
             cat /tmp/original-body.md
