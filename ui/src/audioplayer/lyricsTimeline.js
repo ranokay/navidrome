@@ -1,4 +1,3 @@
-import { resolveKaraokeTokenWindow } from './lyrics'
 import { KARAOKE_SCROLL_PRE_ROLL_MS } from './lyricsKaraokeConstants'
 
 const finiteTime = (value) => {
@@ -31,11 +30,11 @@ const earliestTokenStart = (line) => {
   return earliest
 }
 
-const latestTokenEnd = (line) => {
+const latestExplicitTokenEnd = (line) => {
   const tokens = Array.isArray(line?.tokens) ? line.tokens : []
   let latest = null
   for (const token of tokens) {
-    const end = finiteTime(token?.end) ?? finiteTime(token?.start)
+    const end = finiteTime(token?.end)
     if (end != null && (latest == null || end > latest)) latest = end
   }
   return latest
@@ -59,7 +58,7 @@ export const buildLyricsTimeline = (
   const trackEnd = finiteTime(durationMs)
   const windows = sourceLines.map((line, lineIndex) => {
     const start = starts[lineIndex]
-    let end = finiteTime(line?.end) ?? latestTokenEnd(line)
+    let end = finiteTime(line?.end) ?? latestExplicitTokenEnd(line)
     if (end == null) end = nextTimedStarts[lineIndex]
     if (end == null && start != null) {
       end = start + fallbackLineDurationMs
@@ -209,32 +208,8 @@ export const resolveKaraokeTokenWindows = (line, lineEndFallback = null) => {
   const hasLineWindow =
     lineStart != null && lineEnd != null && lineEnd > lineStart
   const tokenCount = tokens.length
-  let explicitStartCount = 0
-  let explicitEndCount = 0
-  const uniqueStarts = new Set()
-  const uniqueEnds = new Set()
-
-  for (const token of tokens) {
-    const start = finiteTime(token?.start)
-    const end = finiteTime(token?.end)
-    if (start != null) {
-      explicitStartCount += 1
-      uniqueStarts.add(start)
-    }
-    if (end != null) {
-      explicitEndCount += 1
-      uniqueEnds.add(end)
-    }
-  }
-
-  const collapsedStarts =
-    explicitStartCount > 1 && uniqueStarts.size <= Math.max(1, tokenCount / 4)
-  const collapsedEnds =
-    explicitEndCount > 1 && uniqueEnds.size <= Math.max(1, tokenCount / 4)
-  const forceEstimated =
-    hasLineWindow && tokenCount > 1 && (collapsedStarts || collapsedEnds)
-
   const windows = new Array(tokenCount)
+
   for (let tokenIndex = 0; tokenIndex < tokenCount; tokenIndex += 1) {
     const token = tokens[tokenIndex]
     const previousToken = tokenIndex > 0 ? tokens[tokenIndex - 1] : null
@@ -245,27 +220,21 @@ export const resolveKaraokeTokenWindows = (line, lineEndFallback = null) => {
     const estimatedEnd = hasLineWindow
       ? lineStart + ((lineEnd - lineStart) * (tokenIndex + 1)) / tokenCount
       : null
+    const previousEnd =
+      finiteTime(previousToken?.end) ?? finiteTime(previousToken?.start)
 
-    let start
-    let end
-    if (forceEstimated) {
-      start = estimatedStart
-      end = estimatedEnd
-    } else {
-      const previousEnd =
-        finiteTime(previousToken?.end) ?? finiteTime(previousToken?.start)
-      start = finiteTime(token?.start)
-      if (start == null) start = previousEnd ?? estimatedStart ?? lineStart
-      end = finiteTime(token?.end)
-      if (end == null) {
-        const nextStart = finiteTime(nextToken?.start)
-        const nextEstimatedStart =
-          hasLineWindow && tokenIndex + 1 < tokenCount
-            ? lineStart +
-              ((lineEnd - lineStart) * (tokenIndex + 1)) / tokenCount
-            : null
-        end = nextStart ?? nextEstimatedStart ?? estimatedEnd ?? lineEnd
-      }
+    let start = finiteTime(token?.start)
+    if (start == null) start = previousEnd ?? estimatedStart ?? lineStart
+
+    let end = finiteTime(token?.end)
+    if (end == null) {
+      const nextStart = finiteTime(nextToken?.start)
+      const nextEstimatedStart =
+        hasLineWindow && tokenIndex + 1 < tokenCount
+          ? lineStart +
+            ((lineEnd - lineStart) * (tokenIndex + 1)) / tokenCount
+          : null
+      end = nextStart ?? nextEstimatedStart ?? estimatedEnd ?? lineEnd
     }
 
     if (
@@ -307,8 +276,3 @@ export const tokenProgressAt = (window, time) => {
     Math.min(1, (current - window.start) / (window.end - window.start)),
   )
 }
-
-// Kept for callers that need exact compatibility while migrating. New hot paths
-// should use resolveKaraokeTokenWindows so the line is analyzed only once.
-export const resolveSingleTokenWindow = (line, tokenIndex, fallbackEnd) =>
-  resolveKaraokeTokenWindow(line, tokenIndex, fallbackEnd)
