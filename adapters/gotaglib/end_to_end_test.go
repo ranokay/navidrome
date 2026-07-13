@@ -117,6 +117,7 @@ var _ = Describe("Extractor", func() {
 				DisplayArtist: "",
 				DisplayTitle:  "",
 				Lang:          code,
+				Format:        model.LyricFormatLRC,
 				Line: []model.Line{
 					{Start: new(int64(0)), Value: "This is"},
 					{Start: new(int64(2500)), Value: secondLine},

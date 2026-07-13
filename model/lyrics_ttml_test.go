@@ -139,9 +139,9 @@ var _ = Describe("parseTTML", func() {
 			Expect(line.End).To(Equal(new(int64(3000))))
 			Expect(line.Cue).To(HaveLen(3))
 
-			Expect(line.Cue[0]).To(Equal(Cue{Start: new(int64(1000)), End: new(int64(1400)), Value: "He", ByteStart: 0, ByteEnd: 1, AgentID: "main"}))
-			Expect(line.Cue[1]).To(Equal(Cue{Start: new(int64(1400)), End: new(int64(1800)), Value: "llo", ByteStart: 2, ByteEnd: 4, AgentID: "main"}))
-			Expect(line.Cue[2]).To(Equal(Cue{Start: new(int64(2000)), End: new(int64(2500)), Value: "echo", ByteStart: 6, ByteEnd: 9, AgentID: "__nd_bg__|main"}))
+			Expect(line.Cue[0]).To(Equal(Cue{Start: new(int64(1000)), End: new(int64(1400)), Value: "He", ByteStart: 0, ByteEnd: 1, AgentID: "main", Precision: LyricPrecisionSegment}))
+			Expect(line.Cue[1]).To(Equal(Cue{Start: new(int64(1400)), End: new(int64(1800)), Value: "llo", ByteStart: 2, ByteEnd: 4, AgentID: "main", Precision: LyricPrecisionSegment}))
+			Expect(line.Cue[2]).To(Equal(Cue{Start: new(int64(2000)), End: new(int64(2500)), Value: "echo", ByteStart: 6, ByteEnd: 9, AgentID: "__nd_bg__|main", Precision: LyricPrecisionSegment}))
 		})
 
 		It("should append role tokens exactly instead of using substring matches", func() {
@@ -296,10 +296,10 @@ var _ = Describe("parseTTML", func() {
 			Expect(line.Value).To(Equal("It in, (When you slide)"))
 			Expect(line.Value).ToNot(ContainSubstring("\n"))
 			Expect(line.Cue).To(HaveLen(4))
-			Expect(line.Cue[0]).To(Equal(Cue{Start: new(int64(82889)), End: new(int64(83127)), Value: "It", ByteStart: 0, ByteEnd: 1, AgentID: "v2"}))
-			Expect(line.Cue[1]).To(Equal(Cue{Start: new(int64(83374)), End: new(int64(83938)), Value: "in,", ByteStart: 3, ByteEnd: 5, AgentID: "v2"}))
-			Expect(line.Cue[2]).To(Equal(Cue{Start: new(int64(83881)), End: new(int64(84243)), Value: "(When you", ByteStart: 7, ByteEnd: 15, AgentID: "__nd_bg__|v2"}))
-			Expect(line.Cue[3]).To(Equal(Cue{Start: new(int64(86232)), End: new(int64(86859)), Value: "slide)", ByteStart: 17, ByteEnd: 22, AgentID: "__nd_bg__|v2"}))
+			Expect(line.Cue[0]).To(Equal(Cue{Start: new(int64(82889)), End: new(int64(83127)), Value: "It", ByteStart: 0, ByteEnd: 1, AgentID: "v2", Precision: LyricPrecisionSegment}))
+			Expect(line.Cue[1]).To(Equal(Cue{Start: new(int64(83374)), End: new(int64(83938)), Value: "in,", ByteStart: 3, ByteEnd: 5, AgentID: "v2", Precision: LyricPrecisionSegment}))
+			Expect(line.Cue[2]).To(Equal(Cue{Start: new(int64(83881)), End: new(int64(84243)), Value: "(When you", ByteStart: 7, ByteEnd: 15, AgentID: "__nd_bg__|v2", Precision: LyricPrecisionSegment}))
+			Expect(line.Cue[3]).To(Equal(Cue{Start: new(int64(86232)), End: new(int64(86859)), Value: "slide)", ByteStart: 17, ByteEnd: 22, AgentID: "__nd_bg__|v2", Precision: LyricPrecisionSegment}))
 		})
 
 		It("should preserve explicit <br/> as a line break", func() {
@@ -415,8 +415,8 @@ var _ = Describe("parseTTML", func() {
 			Expect(line.Value).To(Equal("go go"))
 			Expect(line.End).To(Equal(new(int64(45570))))
 			Expect(line.Cue).To(HaveLen(2))
-			Expect(line.Cue[0]).To(Equal(Cue{Start: new(int64(43444)), End: new(int64(43716)), Value: "go", ByteStart: 0, ByteEnd: 1}))
-			Expect(line.Cue[1]).To(Equal(Cue{Start: new(int64(43716)), End: new(int64(43887)), Value: "go", ByteStart: 3, ByteEnd: 4}))
+			Expect(line.Cue[0]).To(Equal(Cue{Start: new(int64(43444)), End: new(int64(43716)), Value: "go", ByteStart: 0, ByteEnd: 1, Precision: LyricPrecisionSegment}))
+			Expect(line.Cue[1]).To(Equal(Cue{Start: new(int64(43716)), End: new(int64(43887)), Value: "go", ByteStart: 3, ByteEnd: 4, Precision: LyricPrecisionSegment}))
 		})
 	})
 
@@ -499,8 +499,8 @@ var _ = Describe("parseTTML", func() {
 			Expect(pronunciation.Line[0].Value).To(Equal("konni"))
 			Expect(pronunciation.Line[0].End).To(Equal(new(int64(2600))))
 			Expect(pronunciation.Line[0].Cue).To(HaveLen(2))
-			Expect(pronunciation.Line[0].Cue[0]).To(Equal(Cue{Start: new(int64(2000)), End: new(int64(2300)), Value: "ko", ByteStart: 0, ByteEnd: 1}))
-			Expect(pronunciation.Line[0].Cue[1]).To(Equal(Cue{Start: new(int64(2300)), End: new(int64(2600)), Value: "nni", ByteStart: 2, ByteEnd: 4}))
+			Expect(pronunciation.Line[0].Cue[0]).To(Equal(Cue{Start: new(int64(2000)), End: new(int64(2300)), Value: "ko", ByteStart: 0, ByteEnd: 1, Precision: LyricPrecisionSegment}))
+			Expect(pronunciation.Line[0].Cue[1]).To(Equal(Cue{Start: new(int64(2300)), End: new(int64(2600)), Value: "nni", ByteStart: 2, ByteEnd: 4, Precision: LyricPrecisionSegment}))
 		})
 	})
 
@@ -543,9 +543,9 @@ var _ = Describe("parseTTML", func() {
 			Expect(line.Start).To(Equal(new(int64(2747))))
 			Expect(line.Value).To(Equal("I woke up"))
 			Expect(line.Cue).To(HaveLen(3))
-			Expect(line.Cue[0]).To(Equal(Cue{Start: new(int64(2747)), End: new(int64(3018)), Value: "I", ByteStart: 0, ByteEnd: 0}))
-			Expect(line.Cue[1]).To(Equal(Cue{Start: new(int64(3018)), End: new(int64(3179)), Value: "woke", ByteStart: 2, ByteEnd: 5}))
-			Expect(line.Cue[2]).To(Equal(Cue{Start: new(int64(3179)), End: new(int64(3582)), Value: "up", ByteStart: 7, ByteEnd: 8}))
+			Expect(line.Cue[0]).To(Equal(Cue{Start: new(int64(2747)), End: new(int64(3018)), Value: "I", ByteStart: 0, ByteEnd: 0, Precision: LyricPrecisionSegment}))
+			Expect(line.Cue[1]).To(Equal(Cue{Start: new(int64(3018)), End: new(int64(3179)), Value: "woke", ByteStart: 2, ByteEnd: 5, Precision: LyricPrecisionSegment}))
+			Expect(line.Cue[2]).To(Equal(Cue{Start: new(int64(3179)), End: new(int64(3582)), Value: "up", ByteStart: 7, ByteEnd: 8, Precision: LyricPrecisionSegment}))
 		})
 	})
 })

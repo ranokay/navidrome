@@ -35,6 +35,11 @@ var _ = Describe("Tags", func() {
 			Line:   lines,
 			Synced: synced,
 		}
+		if synced {
+			lyrics.Format = model.LyricFormatLRC
+		} else {
+			lyrics.Format = model.LyricFormatPlain
+		}
 
 		return lyrics
 	}

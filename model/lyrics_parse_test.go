@@ -190,7 +190,8 @@ Another subtitle line`
 		Expect(err).ToNot(HaveOccurred())
 		Expect(list).To(Equal(LyricList{
 			{
-				Lang: "por",
+				Format: LyricFormatSRT,
+				Lang:   "por",
 				Line: []Line{
 					{
 						Start: new(int64(18800)),

@@ -3,6 +3,7 @@ package scanner
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -17,6 +18,7 @@ import (
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/consts"
 	"github.com/navidrome/navidrome/core/artwork"
+	corelyrics "github.com/navidrome/navidrome/core/lyrics"
 	"github.com/navidrome/navidrome/core/storage"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
@@ -46,7 +48,13 @@ func createPhaseFolders(ctx context.Context, state *scanState, ds model.DataStor
 		jobs = append(jobs, job)
 	}
 
-	return &phaseFolders{jobs: jobs, ctx: ctx, ds: ds, state: state}
+	return &phaseFolders{
+		jobs:           jobs,
+		ctx:            ctx,
+		ds:             ds,
+		state:          state,
+		lyricsProvider: corelyrics.NewLyrics(ds, nil),
+	}
 }
 
 type scanJob struct {
@@ -127,6 +135,7 @@ type phaseFolders struct {
 	ds               model.DataStore
 	ctx              context.Context
 	state            *scanState
+	lyricsProvider   corelyrics.Provider
 	prevAlbumPIDConf string
 }
 
@@ -282,6 +291,9 @@ func (p *phaseFolders) loadTagsFromFiles(entry *folderEntry, toImport map[string
 		for filePath, info := range allInfo {
 			md := metadata.New(filePath, info)
 			track := md.ToMediaFile(entry.job.lib.ID, entry.id)
+			if err := p.persistResolvedLyrics(entry.job.lib.Path, &track); err != nil {
+				log.Warn(p.ctx, "Scanner: Error resolving lyrics. Keeping embedded lyrics", "file", filePath, err)
+			}
 			tracks = append(tracks, track)
 			for _, t := range track.Tags.FlattenAll() {
 				uniqueTags[t.ID] = t
@@ -302,6 +314,24 @@ func (p *phaseFolders) loadTagsFromFiles(entry *folderEntry, toImport map[string
 	}
 	entry.tracks = tracks
 	entry.tags = slices.Collect(maps.Values(uniqueTags))
+	return nil
+}
+
+func (p *phaseFolders) persistResolvedLyrics(libraryPath string, track *model.MediaFile) error {
+	track.LibraryPath = libraryPath
+	lyricsList, err := p.lyricsProvider.GetLyrics(p.ctx, track)
+	if err != nil {
+		return err
+	}
+	if len(lyricsList) == 0 {
+		return nil
+	}
+
+	rawLyrics, err := json.Marshal(lyricsList)
+	if err != nil {
+		return fmt.Errorf("serializing resolved lyrics: %w", err)
+	}
+	track.Lyrics = string(rawLyrics)
 	return nil
 }
 

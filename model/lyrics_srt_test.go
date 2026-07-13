@@ -14,11 +14,24 @@ var _ = Describe("parseSRT", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(list).To(HaveLen(1))
 		Expect(list[0].Lang).To(Equal("xxx"))
+		Expect(list[0].Format).To(Equal(LyricFormatSRT))
 		Expect(list[0].Synced).To(BeTrue())
 		Expect(list[0].Line).To(Equal([]Line{
 			{Start: new(int64(1000)), End: new(int64(2000)), Value: "First subtitle"},
 			{Start: new(int64(3000)), End: new(int64(4000)), Value: "Second subtitle"},
 		}))
+	})
+
+	It("keeps valid blocks when one block has malformed timing", func() {
+		content := []byte("1\n00:00:01,000 --> nope\nBroken\n\n2\n00:00:03,000 --> 00:00:04,000\nValid")
+
+		list, err := parseSRT("eng", content)
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(list).To(HaveLen(1))
+		Expect(list[0].Line).To(Equal([]Line{{
+			Start: new(int64(3000)), End: new(int64(4000)), Value: "Valid",
+		}}))
 	})
 
 	It("returns nil for input with no valid blocks", func() {
