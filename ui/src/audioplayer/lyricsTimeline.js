@@ -25,7 +25,8 @@ const earliestTokenStart = (line) => {
   let earliest = null
   for (const token of tokens) {
     const start = finiteTime(token?.start)
-    if (start != null && (earliest == null || start < earliest)) earliest = start
+    if (start != null && (earliest == null || start < earliest))
+      earliest = start
   }
   return earliest
 }
@@ -213,7 +214,8 @@ export const resolveKaraokeTokenWindows = (line, lineEndFallback = null) => {
   for (let tokenIndex = 0; tokenIndex < tokenCount; tokenIndex += 1) {
     const token = tokens[tokenIndex]
     const previousToken = tokenIndex > 0 ? tokens[tokenIndex - 1] : null
-    const nextToken = tokenIndex + 1 < tokenCount ? tokens[tokenIndex + 1] : null
+    const nextToken =
+      tokenIndex + 1 < tokenCount ? tokens[tokenIndex + 1] : null
     const estimatedStart = hasLineWindow
       ? lineStart + ((lineEnd - lineStart) * tokenIndex) / tokenCount
       : null
@@ -231,8 +233,7 @@ export const resolveKaraokeTokenWindows = (line, lineEndFallback = null) => {
       const nextStart = finiteTime(nextToken?.start)
       const nextEstimatedStart =
         hasLineWindow && tokenIndex + 1 < tokenCount
-          ? lineStart +
-            ((lineEnd - lineStart) * (tokenIndex + 1)) / tokenCount
+          ? lineStart + ((lineEnd - lineStart) * (tokenIndex + 1)) / tokenCount
           : null
       end = nextStart ?? nextEstimatedStart ?? estimatedEnd ?? lineEnd
     }

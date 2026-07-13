@@ -103,15 +103,11 @@ const buildTokenData = (token, rgb, window, text) => {
   }
 }
 
-const tokenRef = ({
-  registerToken,
-  key,
-  lineIndex,
-  window,
-  presentation,
-}) => (node) => {
-  registerToken?.(key, { lineIndex, window, presentation }, node)
-}
+const tokenRef =
+  ({ registerToken, key, lineIndex, window, presentation }) =>
+  (node) => {
+    registerToken?.(key, { lineIndex, window, presentation }, node)
+  }
 
 export const KaraokeLineRow = memo(
   ({
@@ -386,12 +382,7 @@ export const KaraokeStackedLineRow = memo(
             : null
           const mainKey = `${lineIndex}:${rowKey}:${segment.tokenIndex}:main`
           const mainTokenData = segment.token
-            ? buildTokenData(
-                segment.token,
-                tokenRGB,
-                mainWindow,
-                segment.text,
-              )
+            ? buildTokenData(segment.token, tokenRGB, mainWindow, segment.text)
             : null
           const mainText = segment.token ? (
             <span

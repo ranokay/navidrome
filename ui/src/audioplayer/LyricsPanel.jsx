@@ -551,7 +551,8 @@ const LyricsPanel = ({
           {mainLines.map((line, idx) => {
             const trLine = trByMainIndex[idx]
             const prLine = prByMainIndex[idx]
-            const mainNextLineStart = timeline.windows[idx]?.nextTimedStart ?? null
+            const mainNextLineStart =
+              timeline.windows[idx]?.nextTimedStart ?? null
             const showTr = shouldShowAuxLine(line, trLine)
             const showPr = shouldShowAuxLine(line, prLine)
             const lineLanes = getLineLanes(line)

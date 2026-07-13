@@ -139,15 +139,15 @@ describe('<LyricsPanel />', () => {
       },
       pronunciationLyric: {
         synced: true,
-        line: [
-          { start: 0, end: 1000, value: 'wo zong yao gei yi xie bie de' },
-        ],
+        line: [{ start: 0, end: 1000, value: 'wo zong yao gei yi xie bie de' }],
       },
       showPronunciation: true,
     })
 
     expect(screen.getByText('我总要给一些别的')).toBeInTheDocument()
-    expect(screen.getByText('wo zong yao gei yi xie bie de')).toBeInTheDocument()
+    expect(
+      screen.getByText('wo zong yao gei yi xie bie de'),
+    ).toBeInTheDocument()
   })
 
   it('renders unsynced lyrics as static selectable text', () => {

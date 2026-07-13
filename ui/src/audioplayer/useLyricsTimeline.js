@@ -41,7 +41,8 @@ const rgba = (rgb, alpha) => {
 
 const setProgress = (record, value) => {
   const next = Math.max(0, Math.min(1, value))
-  if (record.progress != null && Math.abs(record.progress - next) < 0.001) return
+  if (record.progress != null && Math.abs(record.progress - next) < 0.001)
+    return
   record.progress = next
   record.node.style.setProperty('--lyrics-progress', String(next))
 }
@@ -72,8 +73,7 @@ const applyTokenState = (record, state, progress = 0) => {
     if (presentation.useCrossfade) {
       const alpha =
         (presentation.futureAlpha ?? 0.34) +
-        ((presentation.activeAlpha ?? 1) -
-          (presentation.futureAlpha ?? 0.34)) *
+        ((presentation.activeAlpha ?? 1) - (presentation.futureAlpha ?? 0.34)) *
           progress
       setSolidTokenColor(record, rgba(presentation.rgb, alpha))
       setProgress(record, progress)
@@ -100,7 +100,8 @@ const resetToken = (record, state = 'future') => {
 
 const setTokenPresentation = (record, time) => {
   const progress = tokenProgressAt(record.window, time)
-  const state = progress <= 0 ? 'future' : progress >= 1 ? 'completed' : 'active'
+  const state =
+    progress <= 0 ? 'future' : progress >= 1 ? 'completed' : 'active'
   if (record.state !== state || state === 'active') {
     applyTokenState(record, state, progress)
   }
@@ -109,8 +110,8 @@ const setTokenPresentation = (record, time) => {
 const canListenToMedia = (audio) =>
   Boolean(
     audio &&
-      typeof audio.addEventListener === 'function' &&
-      typeof audio.removeEventListener === 'function',
+    typeof audio.addEventListener === 'function' &&
+    typeof audio.removeEventListener === 'function',
   )
 
 const useLyricsTimeline = ({
@@ -341,19 +342,16 @@ const useLyricsTimeline = ({
         if (
           lineWindow?.valid &&
           lastAppliedTimeRef.current >= lineWindow.end &&
-          lastAppliedTimeRef.current <
-            lineWindow.end + KARAOKE_LINE_RELEASE_MS
+          lastAppliedTimeRef.current < lineWindow.end + KARAOKE_LINE_RELEASE_MS
         ) {
           setTokenPresentation(
             record,
-            lineWindow.end +
-              (reducedMotion ? 0 : KARAOKE_HIGHLIGHT_LEAD_MS),
+            lineWindow.end + (reducedMotion ? 0 : KARAOKE_HIGHLIGHT_LEAD_MS),
           )
         } else {
           resetToken(
             record,
-            lineWindow?.valid &&
-              lastAppliedTimeRef.current >= lineWindow.end
+            lineWindow?.valid && lastAppliedTimeRef.current >= lineWindow.end
               ? 'inactive-past'
               : 'future',
           )
@@ -452,10 +450,7 @@ const useLyricsTimeline = ({
         current = observed
         anchorAudioMs = observed
         anchorPerfMs = now
-      } else if (
-        backwards > 0 &&
-        backwards <= KARAOKE_MONOTONIC_JITTER_MS
-      ) {
+      } else if (backwards > 0 && backwards <= KARAOKE_MONOTONIC_JITTER_MS) {
         current = lastFrameTime
       }
       lastFrameTime = Math.max(0, current)

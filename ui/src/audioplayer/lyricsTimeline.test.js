@@ -48,10 +48,9 @@ describe('lyricsTimeline', () => {
   })
 
   it('caps a final open line with track duration', () => {
-    const timeline = buildLyricsTimeline(
-      [{ start: 7000, tokens: [] }],
-      { durationMs: 10000 },
-    )
+    const timeline = buildLyricsTimeline([{ start: 7000, tokens: [] }], {
+      durationMs: 10000,
+    })
 
     expect(timeline.windows[0]).toMatchObject({
       start: 7000,

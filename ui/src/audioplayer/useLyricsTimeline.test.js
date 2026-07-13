@@ -79,10 +79,9 @@ describe('useLyricsTimeline', () => {
     expect(result.current.activeIndexes).toEqual([0])
     expect(lineNode.dataset.active).toBe('true')
     expect(tokenNode.dataset.lyricsState).toBe('active')
-    expect(Number(tokenNode.style.getPropertyValue('--lyrics-progress'))).toBeCloseTo(
-      0.74,
-      2,
-    )
+    expect(
+      Number(tokenNode.style.getPropertyValue('--lyrics-progress')),
+    ).toBeCloseTo(0.74, 2)
     expect(window.requestAnimationFrame).not.toHaveBeenCalled()
   })
 
