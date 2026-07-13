@@ -2,6 +2,7 @@ window.global = window // fix "global is not defined" error in react-image-light
 
 import ReactDOM from 'react-dom'
 import './index.css'
+import './audioplayer/lyricsKaraokeOverrides.css'
 import App from './App'
 import { registerSW } from 'virtual:pwa-register'
 
