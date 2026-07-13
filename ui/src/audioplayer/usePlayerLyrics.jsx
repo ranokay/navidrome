@@ -81,6 +81,7 @@ const usePlayerLyrics = ({ song, isRadio, audioInstance, isDesktop }) => {
       pronunciationLyric: lyricLayers.pronunciation,
       translationMatches: lyricLayers.translationByMain,
       pronunciationMatches: lyricLayers.pronunciationByMain,
+      pronunciationTokens: lyricLayers.pronunciationTokensByMain,
       showTranslation,
       showPronunciation,
       translationEnabled: hasTranslationLyric,
@@ -99,6 +100,7 @@ const usePlayerLyrics = ({ song, isRadio, audioInstance, isDesktop }) => {
       lyricLayers.main,
       lyricLayers.pronunciation,
       lyricLayers.pronunciationByMain,
+      lyricLayers.pronunciationTokensByMain,
       lyricLayers.translation,
       lyricLayers.translationByMain,
       lyricsError,
@@ -121,6 +123,7 @@ const usePlayerLyrics = ({ song, isRadio, audioInstance, isDesktop }) => {
           pronunciationLyric={lyricLayers.pronunciation}
           translationMatches={lyricLayers.translationByMain}
           pronunciationMatches={lyricLayers.pronunciationByMain}
+          pronunciationTokens={lyricLayers.pronunciationTokensByMain}
           showTranslation={showTranslation}
           showPronunciation={showPronunciation}
           audioInstance={audioInstance}
@@ -135,6 +138,7 @@ const usePlayerLyrics = ({ song, isRadio, audioInstance, isDesktop }) => {
       lyricLayers.main,
       lyricLayers.pronunciation,
       lyricLayers.pronunciationByMain,
+      lyricLayers.pronunciationTokensByMain,
       lyricLayers.translation,
       lyricLayers.translationByMain,
       lyricsError,

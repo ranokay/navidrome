@@ -1,5 +1,5 @@
 const CACHE_LIMIT = 75
-export const LYRIC_SCHEMA_VERSION = 2
+export const LYRIC_SCHEMA_VERSION = 3
 
 const cache = new Map()
 const normalizeLanguageTag = (value) =>
@@ -25,6 +25,23 @@ const codePointByteLength = (codePoint) => {
   return 4
 }
 
+const utf8ByteLength = (text) => {
+  let length = 0
+  for (const value of String(text || '')) {
+    length += codePointByteLength(value.codePointAt(0))
+  }
+  return length
+}
+
+const hashString = (value) => {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
+}
+
 export const utf8ByteOffsetToCodeUnitIndex = (text, targetOffset) => {
   const target = byteOffset(targetOffset)
   if (!text || target == null || target <= 0) return 0
@@ -41,7 +58,12 @@ export const utf8ByteOffsetToCodeUnitIndex = (text, targetOffset) => {
 export const utf8ByteRangeToCodeUnitRange = (text, start, end) => {
   const byteStart = byteOffset(start)
   const byteEnd = byteOffset(end)
-  if (typeof text !== 'string' || byteStart == null || byteEnd < byteStart) {
+  if (
+    typeof text !== 'string' ||
+    byteStart == null ||
+    byteEnd == null ||
+    byteEnd < byteStart
+  ) {
     return null
   }
   const startIndex = utf8ByteOffsetToCodeUnitIndex(text, byteStart)
@@ -167,6 +189,7 @@ const normalizeCues = (line, format, offset, locale) => {
       byteStart: byteOffset(cue?.byteStart),
       byteEnd: byteOffset(cue?.byteEnd),
       agentId: String(cue?.agentId || ''),
+      sourceId: String(cue?.sourceId || cue?.id || cue?.for || ''),
       requestedPrecision: cue?.precision,
       graphemes,
     }
@@ -193,6 +216,106 @@ const normalizeCues = (line, format, offset, locale) => {
         (a.start ?? Infinity) - (b.start ?? Infinity) ||
         a.sourceIndex - b.sourceIndex,
     )
+}
+
+const buildDisplaySegments = (value, cues, agents) => {
+  const text = String(value || '')
+  if (!cues.length) {
+    return {
+      valid: true,
+      segments: [{ id: 'text-0', kind: 'text', value: text }],
+    }
+  }
+
+  const sourceCues = [...cues].sort(
+    (left, right) =>
+      (left.byteStart ?? Infinity) - (right.byteStart ?? Infinity) ||
+      left.sourceIndex - right.sourceIndex,
+  )
+  const textByteLength = utf8ByteLength(text)
+  const segments = []
+  let nextByte = 0
+
+  for (const cue of sourceCues) {
+    if (
+      cue.byteStart == null ||
+      cue.byteEnd == null ||
+      cue.byteStart < nextByte ||
+      cue.byteEnd >= textByteLength
+    ) {
+      return {
+        valid: false,
+        segments: [{ id: 'text-0', kind: 'text', value: text }],
+      }
+    }
+
+    if (cue.byteStart > nextByte) {
+      const gap = utf8ByteRangeToCodeUnitRange(
+        text,
+        nextByte,
+        cue.byteStart - 1,
+      )
+      if (!gap) {
+        return {
+          valid: false,
+          segments: [{ id: 'text-0', kind: 'text', value: text }],
+        }
+      }
+      segments.push({
+        id: `gap-${nextByte}`,
+        kind: 'text',
+        value: gap.text,
+      })
+    }
+
+    const range = utf8ByteRangeToCodeUnitRange(text, cue.byteStart, cue.byteEnd)
+    if (!range || range.text !== cue.value) {
+      return {
+        valid: false,
+        segments: [{ id: 'text-0', kind: 'text', value: text }],
+      }
+    }
+    const agent = agents.get(cue.agentId || 'main')
+    segments.push({
+      id: cue.id,
+      kind: 'cue',
+      value: range.text,
+      cueIndex: cue.sourceIndex,
+      byteStart: cue.byteStart,
+      byteEnd: cue.byteEnd,
+      agentId: cue.agentId || 'main',
+      agentRole:
+        agent?.role || (cue.agentId && cue.agentId !== 'main' ? '' : 'main'),
+    })
+    nextByte = cue.byteEnd + 1
+  }
+
+  if (nextByte < textByteLength) {
+    const suffix = utf8ByteRangeToCodeUnitRange(
+      text,
+      nextByte,
+      textByteLength - 1,
+    )
+    if (!suffix) {
+      return {
+        valid: false,
+        segments: [{ id: 'text-0', kind: 'text', value: text }],
+      }
+    }
+    segments.push({
+      id: `gap-${nextByte}`,
+      kind: 'text',
+      value: suffix.text,
+    })
+  }
+
+  if (segments.map((segment) => segment.value).join('') !== text) {
+    return {
+      valid: false,
+      segments: [{ id: 'text-0', kind: 'text', value: text }],
+    }
+  }
+  return { valid: true, segments }
 }
 
 const inferLinePrecision = (cues) => {
@@ -262,7 +385,7 @@ const createTimeline = (lines) => {
   return { startOrder, events, checkpoints, checkpointStride: 64 }
 }
 
-const normalizeDocument = (lyric, { durationMs, locale }) => {
+const normalizeDocument = (lyric, { durationMs, identity, locale }) => {
   if (!lyric || !Array.isArray(lyric.line)) return null
   const offset = finiteTime(lyric.offset) ?? 0
   const format = String(
@@ -276,6 +399,7 @@ const normalizeDocument = (lyric, { durationMs, locale }) => {
   )
   const drafts = lyric.line.map((line, index) => {
     const cues = normalizeCues(line, format, offset, locale)
+    const display = buildDisplaySegments(line?.value, cues, agents)
     const cuesBySourceIndex = []
     cues.forEach((cue) => {
       cuesBySourceIndex[cue.sourceIndex] = cue
@@ -292,7 +416,9 @@ const normalizeDocument = (lyric, { durationMs, locale }) => {
       cues,
       cuesBySourceIndex,
       lanes: normalizeLanes(line, cues, agents),
-      precision: inferLinePrecision(cues),
+      displaySegments: display.segments,
+      hasValidCueRanges: display.valid,
+      precision: display.valid ? inferLinePrecision(cues) : 'line',
       graphemes: segmentGraphemes(String(line?.value || ''), locale),
     }
   })
@@ -326,6 +452,7 @@ const normalizeDocument = (lyric, { durationMs, locale }) => {
   const timed = lines.some((line) => line.start != null)
   return deepFreeze({
     schemaVersion: LYRIC_SCHEMA_VERSION,
+    identity,
     kind: lyricKind(lyric),
     language: normalizeLanguageTag(lyric.lang),
     format,
@@ -365,21 +492,36 @@ export const normalizeSongLyrics = (
     return cached.layers
   }
   const selected = selectLyricLayers(rawLyrics, locale)
-  const main = normalizeDocument(selected.main, { durationMs, locale })
+  const rawHash = hashString(String(rawLyrics))
+  const identityFor = (kind, lyric) =>
+    `${key}:${rawHash}:${kind}:${hashString(JSON.stringify(lyric || null))}`
+  const main = normalizeDocument(selected.main, {
+    durationMs,
+    locale,
+    identity: identityFor('main', selected.main),
+  })
   const translation = normalizeDocument(selected.translation, {
     durationMs,
     locale,
+    identity: identityFor('translation', selected.translation),
   })
   const pronunciation = normalizeDocument(selected.pronunciation, {
     durationMs,
     locale,
+    identity: identityFor('pronunciation', selected.pronunciation),
   })
+  const pronunciationByMain = buildLayerLineIndex(main, pronunciation)
   const layers = deepFreeze({
     main,
     translation,
     pronunciation,
     translationByMain: buildLayerLineIndex(main, translation),
-    pronunciationByMain: buildLayerLineIndex(main, pronunciation),
+    pronunciationByMain,
+    pronunciationTokensByMain: buildPronunciationTokenIndex(
+      main,
+      pronunciation,
+      pronunciationByMain,
+    ),
   })
   cache.set(key, { rawLyrics, layers })
   while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value)
@@ -433,3 +575,128 @@ export const buildLayerLineIndex = (mainDocument, layerDocument) =>
   mainDocument?.lines?.map((_line, index) =>
     findLayerLineForMain(mainDocument, layerDocument, index),
   ) || []
+
+const cueTimesAreMonotonic = (cues) =>
+  cues.every(
+    (cue, index) =>
+      index === 0 ||
+      (cue.start ?? Infinity) >= (cues[index - 1].start ?? Infinity),
+  )
+
+const timingOverlapScore = (mainCue, pronunciationCue) => {
+  if (
+    mainCue.start == null ||
+    mainCue.end == null ||
+    pronunciationCue.start == null ||
+    pronunciationCue.end == null
+  )
+    return 0
+  const overlap =
+    Math.min(mainCue.end, pronunciationCue.end) -
+    Math.max(mainCue.start, pronunciationCue.start)
+  if (overlap <= 0) return 0
+  const pronunciationDuration = Math.max(
+    1,
+    pronunciationCue.end - pronunciationCue.start,
+  )
+  return overlap / pronunciationDuration
+}
+
+const findPronunciationTarget = (
+  mainCues,
+  pronunciationCue,
+  pronunciationIndex,
+  allowIndexFallback,
+) => {
+  if (pronunciationCue.sourceId) {
+    const explicit = mainCues.filter(
+      (candidate) => candidate.sourceId === pronunciationCue.sourceId,
+    )
+    if (explicit.length > 0) return explicit.length === 1 ? explicit[0] : null
+  }
+
+  const exact = mainCues.filter(
+    (candidate) =>
+      candidate.start === pronunciationCue.start &&
+      candidate.end === pronunciationCue.end,
+  )
+  if (exact.length > 0) return exact.length === 1 ? exact[0] : null
+
+  const overlaps = mainCues
+    .map((candidate) => ({
+      candidate,
+      score: timingOverlapScore(candidate, pronunciationCue),
+    }))
+    .filter(({ score }) => score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.candidate.sourceIndex - right.candidate.sourceIndex,
+    )
+  if (
+    overlaps.length > 0 &&
+    (overlaps.length === 1 || overlaps[0].score > overlaps[1].score)
+  ) {
+    return overlaps[0].candidate
+  }
+
+  const boundary = mainCues.filter(
+    (candidate) =>
+      candidate.start === pronunciationCue.start ||
+      candidate.end === pronunciationCue.end,
+  )
+  if (boundary.length > 0) return boundary.length === 1 ? boundary[0] : null
+  return allowIndexFallback ? mainCues[pronunciationIndex] || null : null
+}
+
+export const buildPronunciationTokenIndex = (
+  mainDocument,
+  pronunciationDocument,
+  lineMatches = buildLayerLineIndex(mainDocument, pronunciationDocument),
+) =>
+  mainDocument?.lines?.map((mainLine, lineIndex) => {
+    const pronunciationLine = lineMatches[lineIndex]
+    if (
+      !pronunciationLine?.cues?.length ||
+      !mainLine.cues.length ||
+      !mainLine.hasValidCueRanges
+    ) {
+      return pronunciationLine
+        ? { mode: 'line', line: pronunciationLine, tokens: [] }
+        : null
+    }
+
+    const allowIndexFallback =
+      mainLine.cues.length === pronunciationLine.cues.length &&
+      cueTimesAreMonotonic(mainLine.cues) &&
+      cueTimesAreMonotonic(pronunciationLine.cues)
+    const groups = new Map()
+    for (
+      let pronunciationIndex = 0;
+      pronunciationIndex < pronunciationLine.cues.length;
+      pronunciationIndex += 1
+    ) {
+      const pronunciationCue = pronunciationLine.cues[pronunciationIndex]
+      const mainCue = findPronunciationTarget(
+        mainLine.cues,
+        pronunciationCue,
+        pronunciationIndex,
+        allowIndexFallback,
+      )
+      if (!mainCue) {
+        return { mode: 'line', line: pronunciationLine, tokens: [] }
+      }
+      if (!groups.has(mainCue.sourceIndex)) groups.set(mainCue.sourceIndex, [])
+      groups.get(mainCue.sourceIndex).push(pronunciationCue)
+    }
+
+    const tokens = Array.from(groups, ([mainCueIndex, cues]) => ({
+      id: `pronunciation-${mainCueIndex}`,
+      mainCueIndex,
+      value: cues.map((cue) => cue.value).join(''),
+      cues,
+    })).sort((left, right) => left.mainCueIndex - right.mainCueIndex)
+    return tokens.length
+      ? { mode: 'tokens', line: pronunciationLine, tokens }
+      : { mode: 'line', line: pronunciationLine, tokens: [] }
+  }) || []

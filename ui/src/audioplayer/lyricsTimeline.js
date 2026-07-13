@@ -167,6 +167,33 @@ export const waveTimingFor = (cue) => {
   const duration = (cue?.end ?? 0) - (cue?.start ?? 0)
   if (count < 2 || count > 40 || duration <= 0) return null
   const budget = duration * 0.35
-  const stagger = Math.max(12, Math.min(45, budget / (count - 1)))
-  return { stagger, duration, count }
+  const availableStagger = budget / (count - 1)
+  if (availableStagger < 12) return null
+  const stagger = Math.min(45, availableStagger)
+  const offsetWindow = stagger * (count - 1)
+  const remaining = Math.max(0, duration - offsetWindow)
+  if (remaining < 90) return null
+  const crestDuration = Math.min(240, remaining)
+  return { stagger, duration, count, crestDuration, offsetWindow }
+}
+
+const positiveEnvelope = (phase) => {
+  if (phase <= 0 || phase >= 1) return 0
+  return Math.sin(Math.PI * phase) ** 2
+}
+
+export const tokenLiftAt = (timedPart, time) => {
+  const start = timedPart?.start
+  const end = timedPart?.end
+  if (start == null || end == null || end <= start) return 0
+  const duration = end - start
+  const crestDuration = Math.min(240, duration)
+  return positiveEnvelope((time - start) / crestDuration)
+}
+
+export const graphemeLiftAt = (cue, graphemeIndex, time) => {
+  const wave = waveTimingFor(cue)
+  if (!wave || wave.crestDuration <= 0) return 0
+  const start = cue.start + wave.stagger * graphemeIndex
+  return positiveEnvelope((time - start) / wave.crestDuration)
 }

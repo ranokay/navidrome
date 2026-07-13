@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  LYRIC_SCHEMA_VERSION,
+  buildPronunciationTokenIndex,
   clearLyricsCache,
   findLayerLineForMain,
   getLyricsCacheSize,
@@ -84,7 +86,15 @@ describe('normalizeSongLyrics', () => {
             start: 0,
             end: 1000,
             value: 'hello',
-            cue: [{ start: 0, end: 1000, value: 'hello' }],
+            cue: [
+              {
+                start: 0,
+                end: 1000,
+                value: 'hello',
+                byteStart: 0,
+                byteEnd: 4,
+              },
+            ],
           },
         ],
       },
@@ -97,7 +107,15 @@ describe('normalizeSongLyrics', () => {
             start: 0,
             end: 1000,
             value: 'hola',
-            cue: [{ start: 0, end: 1000, value: 'hola' }],
+            cue: [
+              {
+                start: 0,
+                end: 1000,
+                value: 'hola',
+                byteStart: 0,
+                byteEnd: 3,
+              },
+            ],
           },
         ],
       },
@@ -111,8 +129,22 @@ describe('normalizeSongLyrics', () => {
             end: 1000,
             value: 'ab',
             cue: [
-              { start: 0, end: 500, value: 'a', precision: 'character' },
-              { start: 500, end: 1000, value: 'b', precision: 'character' },
+              {
+                start: 0,
+                end: 500,
+                value: 'a',
+                byteStart: 0,
+                byteEnd: 0,
+                precision: 'character',
+              },
+              {
+                start: 500,
+                end: 1000,
+                value: 'b',
+                byteStart: 1,
+                byteEnd: 1,
+                precision: 'character',
+              },
             ],
           },
         ],
@@ -223,5 +255,180 @@ describe('normalizeSongLyrics', () => {
       main.lines[0].cues[0].graphemes.filter((part) => part.visible),
     ).toHaveLength(1)
     expect(utf8ByteRangeToCodeUnitRange('aé🙂z', 1, 2)?.text).toBe('é')
+  })
+
+  it('preserves source gaps, punctuation, and Unicode outside cue ranges', () => {
+    const value = '지금 e\u0301🙂, go!'
+    const { main } = normalizeSongLyrics(
+      song([
+        {
+          format: 'ttml',
+          synced: true,
+          line: [
+            {
+              start: 0,
+              end: 1000,
+              value,
+              cue: [
+                {
+                  start: 0,
+                  end: 400,
+                  value: '지금',
+                  byteStart: 0,
+                  byteEnd: 5,
+                },
+                {
+                  start: 400,
+                  end: 700,
+                  value: 'e\u0301🙂',
+                  byteStart: 7,
+                  byteEnd: 13,
+                },
+                {
+                  start: 700,
+                  end: 1000,
+                  value: 'go',
+                  byteStart: 16,
+                  byteEnd: 17,
+                },
+              ],
+            },
+          ],
+        },
+      ]),
+    )
+
+    expect(main.schemaVersion).toBe(LYRIC_SCHEMA_VERSION)
+    expect(main.schemaVersion).toBe(3)
+    expect(main.lines[0].displaySegments.map((part) => part.value)).toEqual([
+      '지금',
+      ' ',
+      'e\u0301🙂',
+      ', ',
+      'go',
+      '!',
+    ])
+    expect(
+      main.lines[0].displaySegments.map((part) => part.value).join(''),
+    ).toBe(value)
+  })
+
+  it('downgrades malformed cue ranges without changing visible text', () => {
+    const { main } = normalizeSongLyrics(
+      song([
+        {
+          format: 'ttml',
+          synced: true,
+          line: [
+            {
+              start: 0,
+              end: 1000,
+              value: 'keep every space',
+              cue: [
+                {
+                  start: 0,
+                  end: 1000,
+                  value: 'wrong',
+                  byteStart: 0,
+                  byteEnd: 4,
+                },
+              ],
+            },
+          ],
+        },
+      ]),
+    )
+
+    expect(main.lines[0]).toMatchObject({
+      precision: 'line',
+      hasValidCueRanges: false,
+    })
+    expect(main.lines[0].displaySegments).toEqual([
+      { id: 'text-0', kind: 'text', value: 'keep every space' },
+    ])
+  })
+
+  it('changes document identity when raw lyrics or locale changes', () => {
+    clearLyricsCache()
+    const original = normalizeSongLyrics(song([{ line: [{ value: 'one' }] }]))
+    const changed = normalizeSongLyrics(song([{ line: [{ value: 'two' }] }]))
+    const locale = normalizeSongLyrics(
+      song([{ line: [{ value: 'one' }] }]),
+      'ko',
+    )
+
+    expect(original.main.identity).not.toBe(changed.main.identity)
+    expect(original.main.identity).not.toBe(locale.main.identity)
+  })
+
+  it('matches timed pronunciation cues to main cues and falls back safely', () => {
+    const layers = normalizeSongLyrics(
+      song([
+        {
+          kind: 'main',
+          format: 'ttml',
+          synced: true,
+          line: [
+            {
+              start: 0,
+              end: 1000,
+              value: '지금 가',
+              cue: [
+                {
+                  start: 0,
+                  end: 500,
+                  value: '지금',
+                  byteStart: 0,
+                  byteEnd: 5,
+                },
+                {
+                  start: 500,
+                  end: 1000,
+                  value: '가',
+                  byteStart: 7,
+                  byteEnd: 9,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          kind: 'pronunciation',
+          format: 'ttml',
+          synced: true,
+          line: [
+            {
+              start: 0,
+              end: 1000,
+              value: 'ji geum ga',
+              cue: [
+                { start: 0, end: 250, value: 'ji ' },
+                { start: 250, end: 500, value: 'geum' },
+                { start: 500, end: 1000, value: 'ga' },
+              ],
+            },
+          ],
+        },
+      ]),
+    )
+
+    expect(layers.pronunciationTokensByMain[0]).toMatchObject({
+      mode: 'tokens',
+      tokens: [
+        { mainCueIndex: 0, value: 'ji geum' },
+        { mainCueIndex: 1, value: 'ga' },
+      ],
+    })
+
+    const unmatchedLine = {
+      ...layers.pronunciation.lines[0],
+      cues: [{ start: 1500, end: 1600, value: 'unmatched' }],
+    }
+    const fallback = buildPronunciationTokenIndex(
+      layers.main,
+      { ...layers.pronunciation, lines: [unmatchedLine] },
+      [unmatchedLine],
+    )
+    expect(fallback[0].mode).toBe('line')
   })
 })

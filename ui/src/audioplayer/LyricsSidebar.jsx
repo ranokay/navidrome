@@ -180,6 +180,7 @@ const LyricsSidebar = ({
   pronunciationLyric,
   translationMatches,
   pronunciationMatches,
+  pronunciationTokens,
   showTranslation,
   showPronunciation,
   translationEnabled,
@@ -384,6 +385,7 @@ const LyricsSidebar = ({
           pronunciationLyric={pronunciationLyric}
           translationMatches={translationMatches}
           pronunciationMatches={pronunciationMatches}
+          pronunciationTokens={pronunciationTokens}
           showTranslation={showTranslation}
           showPronunciation={showPronunciation}
           audioInstance={audioInstance}
