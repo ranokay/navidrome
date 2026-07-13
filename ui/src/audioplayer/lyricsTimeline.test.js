@@ -3,6 +3,8 @@ import { normalizeSongLyrics } from './lyrics'
 import {
   LyricQualityMonitor,
   LyricTimelineCursor,
+  graphemeLiftAt,
+  tokenLiftAt,
   waveTimingFor,
 } from './lyricsTimeline'
 
@@ -86,11 +88,30 @@ describe('adaptive lyric quality', () => {
     expect(wave.stagger).toBeGreaterThanOrEqual(12)
     expect(wave.stagger).toBeLessThanOrEqual(45)
     expect(wave.stagger * 19).toBeLessThanOrEqual(350)
+    expect(wave.crestDuration).toBe(240)
+    expect(wave.offsetWindow + wave.crestDuration).toBeLessThanOrEqual(1000)
     expect(
       waveTimingFor({
         ...cue,
         graphemes: Array.from({ length: 41 }, () => ({ visible: true })),
       }),
     ).toBeNull()
+  })
+
+  it('uses only positive lifts and settles every grapheme by the cue end', () => {
+    const cue = {
+      start: 100,
+      end: 1100,
+      graphemes: Array.from({ length: 20 }, () => ({ visible: true })),
+    }
+    for (let time = 0; time <= 1200; time += 5) {
+      expect(tokenLiftAt(cue, time)).toBeGreaterThanOrEqual(0)
+      expect(tokenLiftAt(cue, time)).toBeLessThanOrEqual(1)
+      for (let index = 0; index < 20; index += 1) {
+        expect(graphemeLiftAt(cue, index, time)).toBeGreaterThanOrEqual(0)
+        expect(graphemeLiftAt(cue, index, time)).toBeLessThanOrEqual(1)
+      }
+    }
+    expect(graphemeLiftAt(cue, 19, cue.end)).toBe(0)
   })
 })

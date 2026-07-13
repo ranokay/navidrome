@@ -15,7 +15,15 @@ const lyricDocument = () =>
             start: 0,
             end: 5000,
             value: 'one',
-            cue: [{ start: 0, end: 5000, value: 'one' }],
+            cue: [
+              {
+                start: 0,
+                end: 5000,
+                value: 'one',
+                byteStart: 0,
+                byteEnd: 2,
+              },
+            ],
           },
           { start: 5000, end: 10000, value: 'two' },
         ],
@@ -91,6 +99,111 @@ describe('useLyricsTimeline', () => {
 
     expect(result.all).toHaveLength(rendersBeforeFrames)
     expect(node.style.getPropertyValue('--lyrics-progress')).toBe('0.24')
+  })
+
+  it('clears stale cue presentation on forward and backward seeks', () => {
+    const audio = makeAudio()
+    const lyric = lyricDocument()
+    const { result } = renderHook(() =>
+      useLyricsTimeline({
+        document: lyric,
+        audioInstance: audio,
+        visible: true,
+        reducedMotion: false,
+      }),
+    )
+    const lineNode = window.document.createElement('div')
+    const cueNode = window.document.createElement('span')
+    cueNode.className = 'lyrics-cue'
+    act(() => {
+      result.current.registerLine(0, lineNode)
+      result.current.registerCue(0, 0, cueNode)
+      result.current.syncNow(2500, true)
+    })
+    expect(cueNode.dataset.lyricsState).toBe('active')
+    expect(cueNode.style.getPropertyValue('--lyrics-progress')).toBe('0.5')
+
+    act(() => {
+      result.current.syncNow(6000, true)
+    })
+    expect(cueNode.dataset.lyricsState).toBe('inactive-past')
+    expect(cueNode.dataset.lifting).toBe('false')
+    expect(cueNode.style.getPropertyValue('--lyrics-progress')).toBe('0')
+    expect(cueNode.style.getPropertyValue('--lyrics-token-lift')).toBe('0')
+
+    act(() => {
+      result.current.syncNow(1000, true)
+    })
+    expect(cueNode.dataset.lyricsState).toBe('active')
+    expect(cueNode.style.getPropertyValue('--lyrics-progress')).toBe('0.2')
+
+    act(() => {
+      result.current.syncNow(100, true)
+    })
+    expect(cueNode.dataset.lifting).toBe('true')
+  })
+
+  it('updates overlapping cues independently without completing either early', () => {
+    const audio = makeAudio()
+    const lyric = normalizeSongLyrics({
+      id: 'overlapping-cues',
+      duration: 3,
+      lyrics: JSON.stringify([
+        {
+          synced: true,
+          line: [
+            {
+              start: 0,
+              end: 2000,
+              value: 'one two',
+              cue: [
+                {
+                  start: 0,
+                  end: 1000,
+                  value: 'one',
+                  byteStart: 0,
+                  byteEnd: 2,
+                },
+                {
+                  start: 500,
+                  end: 1500,
+                  value: 'two',
+                  byteStart: 4,
+                  byteEnd: 6,
+                },
+              ],
+            },
+          ],
+        },
+      ]),
+    }).main
+    const { result } = renderHook(() =>
+      useLyricsTimeline({
+        document: lyric,
+        audioInstance: audio,
+        visible: true,
+        reducedMotion: false,
+      }),
+    )
+    const lineNode = window.document.createElement('div')
+    const first = window.document.createElement('span')
+    const second = window.document.createElement('span')
+    first.className = 'lyrics-cue'
+    second.className = 'lyrics-cue'
+    act(() => {
+      result.current.registerLine(0, lineNode)
+      result.current.registerCue(0, 0, first)
+      result.current.registerCue(0, 1, second)
+      result.current.syncNow(750, true)
+    })
+    expect(first.style.getPropertyValue('--lyrics-progress')).toBe('0.75')
+    expect(second.style.getPropertyValue('--lyrics-progress')).toBe('0.25')
+
+    act(() => {
+      result.current.syncNow(1100)
+    })
+    expect(first.style.getPropertyValue('--lyrics-progress')).toBe('1')
+    expect(second.style.getPropertyValue('--lyrics-progress')).toBe('0.6')
   })
 
   it('stops within the same turn on pause, hide, close, and unmount', () => {

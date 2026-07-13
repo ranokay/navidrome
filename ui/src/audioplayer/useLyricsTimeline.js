@@ -47,6 +47,7 @@ const useLyricsTimeline = ({
   const cursorRef = useRef(new LyricTimelineCursor(lyricDocument))
   const lineNodesRef = useRef(new Map())
   const cueNodesRef = useRef(new Map())
+  const lineCueKeysRef = useRef(new Map())
   const cueStateRef = useRef(new Map())
   const frameRef = useRef(0)
   const lastFrameRef = useRef(null)
@@ -76,11 +77,20 @@ const useLyricsTimeline = ({
       const key = `${lineIndex}:${cueIndex}`
       if (!cueNodesRef.current.has(key)) {
         cueNodesRef.current.set(key, new Map())
+        if (!lineCueKeysRef.current.has(lineIndex)) {
+          lineCueKeysRef.current.set(lineIndex, new Set())
+        }
+        lineCueKeysRef.current.get(lineIndex).add(key)
       }
       const slots = cueNodesRef.current.get(key)
       if (!node) {
         slots.delete(slot)
-        if (slots.size === 0) cueNodesRef.current.delete(key)
+        if (slots.size === 0) {
+          cueNodesRef.current.delete(key)
+          const keys = lineCueKeysRef.current.get(lineIndex)
+          keys?.delete(key)
+          if (keys?.size === 0) lineCueKeysRef.current.delete(lineIndex)
+        }
         return
       }
       slots.set(slot, node)
@@ -147,10 +157,8 @@ const useLyricsTimeline = ({
   )
 
   const resetLineCues = useCallback((lineIndex, state) => {
-    const prefix = `${lineIndex}:`
-    cueNodesRef.current.forEach((slots, key) => {
-      if (!key.startsWith(prefix)) return
-      slots.forEach((node) => resetCueNode(node, state))
+    lineCueKeysRef.current.get(lineIndex)?.forEach((key) => {
+      cueNodesRef.current.get(key)?.forEach((node) => resetCueNode(node, state))
     })
     cueStateRef.current.delete(lineIndex)
   }, [])
