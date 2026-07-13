@@ -105,7 +105,7 @@ export const buildLyricsTimeline = (
   })
 
   const scrollOrder = windows
-    .filter((window) => window.preRollStart != null)
+    .filter((window) => window.valid && window.preRollStart != null)
     .sort(
       (left, right) =>
         left.preRollStart - right.preRollStart ||
