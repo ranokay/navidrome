@@ -230,4 +230,43 @@ describe('useEnhancedLyrics', () => {
     expect(subsonic.getLyricsBySongId).toHaveBeenCalledTimes(2)
     second.unmount()
   })
+
+  it('removes translation lines that only repeat the main lyric', async () => {
+    subsonic.getLyricsBySongId.mockResolvedValue({
+      json: {
+        'subsonic-response': {
+          lyricsList: {
+            structuredLyrics: [
+              {
+                kind: 'main',
+                lang: 'en',
+                synced: true,
+                line: [
+                  { start: 0, value: 'Say my name like Ruk ruk ruk' },
+                  { start: 2000, value: 'Everybody wanna be it' },
+                ],
+              },
+              {
+                kind: 'translation',
+                lang: 'en',
+                synced: true,
+                line: [
+                  { start: 0, value: 'Say my name like Ruk, Ruk, Ruk' },
+                  { start: 2000, value: 'Everyone wants to become it' },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    })
+
+    const { result } = renderHook(() => useLyrics('translated-song'))
+
+    await waitFor(() =>
+      expect(result.current.layers.translation?.line).toEqual([
+        { start: 2000, value: 'Everyone wants to become it' },
+      ]),
+    )
+  })
 })
