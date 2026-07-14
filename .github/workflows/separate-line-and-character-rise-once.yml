@@ -34,16 +34,32 @@ jobs:
       - name: Validate UI
         working-directory: ui
         run: |
-          npm run check-formatting
-          npm run lint
-          npm test
-          npm run build
+          set +e
+          {
+            npm run check-formatting
+            npm run lint
+            npm test
+            npm run build
+          } > /tmp/rise-mode-validation.log 2>&1
+          status=$?
+          cat /tmp/rise-mode-validation.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/rise-mode-validation.log ../.github/rise-mode-validation-error.txt
+            cd ..
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/rise-mode-validation-error.txt
+            git commit -m "chore: capture rise-mode validation failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Commit fixes and remove temporary files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f .github/workflows/separate-line-and-character-rise-once.yml
           rm -f .github/scripts/separate-line-and-character-rise.py
+          rm -f .github/rise-mode-validation-error.txt
           git add -A
           git commit -m "fix(ui): separate lyric line and character rise"
           git push origin HEAD:lyrics-sidebar-performance
