@@ -209,6 +209,8 @@ describe('<LyricsPanel />', () => {
     expect(pronunciation).toHaveAttribute('data-timed', 'false')
     expect(mainRow).toHaveAttribute('data-tokenized', 'false')
     expect(translationRow).toHaveAttribute('data-tokenized', 'false')
+    expect(mainRow.style.opacity).toBe('')
+    expect(translationRow.style.opacity).toBe('')
   })
 
   it('keeps timed translations on the main line lifecycle', () => {

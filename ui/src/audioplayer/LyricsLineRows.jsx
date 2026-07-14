@@ -30,6 +30,7 @@ const getTokenRGB = (token, rgb) =>
 
 const stripLayerColors = (style) => {
   const result = { ...(style || {}) }
+  delete result.opacity
   delete result.color
   delete result.WebkitTextFillColor
   delete result['--lyrics-active-color']
