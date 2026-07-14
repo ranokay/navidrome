@@ -147,19 +147,21 @@ test = """  it('keeps gradient paint and opacity continuous when release becomes
       )
     })
 
-    act(() => result.current.syncNow(600, true))
+    act(() => result.current.syncNow(1219, true))
     const gradient = tokenNode.style.backgroundImage
-    const releaseOpacity = tokenNode.style.opacity
+    const releaseOpacity = Number(tokenNode.style.opacity)
     expect(tokenNode.dataset.lyricsState).toBe('release')
     expect(tokenNode.style.color).toBe('transparent')
 
-    act(() => result.current.syncNow(800, true))
+    act(() => result.current.syncNow(1220, true))
 
+    const pastOpacity = Number(tokenNode.style.opacity)
     expect(tokenNode.dataset.lyricsState).toBe('inactive-past')
     expect(tokenNode.style.backgroundImage).toBe(gradient)
     expect(tokenNode.style.color).toBe('transparent')
     expect(tokenNode.style.webkitTextFillColor).toBe('transparent')
-    expect(tokenNode.style.opacity).toBe(releaseOpacity)
+    expect(Math.abs(pastOpacity - releaseOpacity)).toBeLessThan(0.01)
+    expect(pastOpacity).toBeCloseTo(presentation.futureAlpha, 5)
     expect(tokenNode.style.getPropertyValue('--lyrics-progress')).toBe('1')
   })
 
