@@ -26,6 +26,7 @@ jobs:
       - name: Apply timing and transition fixes
         run: |
           set +e
+          # Retry with exact matching for the two shared main/translation rules.
           python3 .github/scripts/revert-lrc-end-and-unify-line-fade.py > /tmp/lrc-revert.log 2>&1
           status=$?
           cat /tmp/lrc-revert.log
