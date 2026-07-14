@@ -138,12 +138,10 @@ const useStyles = makeStyles((theme) => ({
   waveCharacter: {
     display: 'inline-block',
     verticalAlign: 'baseline',
-    transform: 'translate3d(0, 0, 0)',
-    backfaceVisibility: 'hidden',
-    willChange: 'transform',
+    transform: 'translateY(0)',
+    transformOrigin: 'center bottom',
     '@media (prefers-reduced-motion: reduce)': {
       transform: 'none !important',
-      willChange: 'auto',
     },
   },
   line: {

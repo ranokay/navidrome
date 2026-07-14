@@ -2,7 +2,7 @@ import { act } from '@testing-library/react'
 import { renderHook } from '@testing-library/react-hooks'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  KARAOKE_CHARACTER_RISE_MS,
+  KARAOKE_CHARACTER_STAGGER_RATIO,
   KARAOKE_CHARACTER_WAVE_WIDTH,
 } from './lyricsKaraokeConstants'
 import useLyricsTimeline from './useLyricsTimeline'
@@ -203,11 +203,24 @@ describe('useLyricsTimeline', () => {
 
     expect(new Set(transforms).size).toBe(transforms.length)
     transforms.forEach((transform) =>
-      expect(transform).toMatch(/^translate3d\(0, -?\d+\.\d{4}px, 0\)$/),
+      expect(transform).toMatch(/^translateY\(-?\d+\.\d{4}px\)$/),
     )
-    expect(KARAOKE_CHARACTER_RISE_MS).toBeLessThan(
-      4000 * KARAOKE_CHARACTER_WAVE_WIDTH,
+    expect(KARAOKE_CHARACTER_STAGGER_RATIO).toBeGreaterThan(0.5)
+    expect(KARAOKE_CHARACTER_STAGGER_RATIO).toBeLessThan(1)
+
+    act(() => result.current.syncNow(650, true))
+    const characters = tokenNode.querySelectorAll(
+      '[data-lyrics-character="true"]',
     )
+    const firstOffset = Number.parseFloat(
+      characters[0].style.transform.match(/-?\d+\.\d+/)?.[0] || '0',
+    )
+    const secondOffset = Number.parseFloat(
+      characters[1].style.transform.match(/-?\d+\.\d+/)?.[0] || '0',
+    )
+    expect(firstOffset).toBeLessThan(-1)
+    expect(secondOffset).toBeLessThan(0)
+    expect(secondOffset).toBeGreaterThan(firstOffset)
   })
 
   it('keeps interpolated playback time monotonic between coarse media updates', () => {
