@@ -323,6 +323,16 @@ const buildUniqueLayerMap = (mainLines, layerLines) => {
 const getLineLanes = (line) =>
   Array.isArray(line?.lanes) && line.lanes.length > 0 ? line.lanes : [line]
 
+const buildSynchronizedTranslationLine = (mainLine, translationLine) => {
+  const highlighted = buildHighlightedAuxLine(mainLine, translationLine)
+  if (!highlighted) return highlighted
+  return {
+    ...highlighted,
+    tokens: [],
+    lanes: undefined,
+  }
+}
+
 const buildLineGroupStyle = (canSeekLine, layerStyles) => ({
   cursor: canSeekLine ? 'pointer' : undefined,
   '--lyrics-main-idle-color': layerStyles.main.color,
@@ -448,10 +458,10 @@ const LyricsPanel = ({
           color: colorWithAlpha(sourceColor, layer === 'main' ? 0.98 : 0.86),
         }
       }
-      const idleAlpha =
-        layer === 'main' ? 0.46 : layer === 'translation' ? 0.34 : 0.38
       const activeAlpha =
         layer === 'main' ? 0.98 : layer === 'translation' ? 0.72 : 0.78
+      const pronunciationFadeRatio = 0.38 / 0.78
+      const idleAlpha = activeAlpha * pronunciationFadeRatio
       return {
         opacity: 1,
         color: colorWithAlpha(sourceColor, idleAlpha),
@@ -786,12 +796,11 @@ const LyricsPanel = ({
                 {showTr && (
                   <KaraokeLineRow
                     lineIndex={idx}
-                    line={buildHighlightedAuxLine(line, trLine)}
+                    line={buildSynchronizedTranslationLine(line, trLine)}
                     nextLineStart={null}
                     className={clsx(classes.auxLine, classes.translationLine)}
                     style={layerStyles.translation}
                     tokenClassName={classes.token}
-                    registerToken={registerToken}
                     rowKey="translation"
                   />
                 )}

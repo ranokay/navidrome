@@ -179,6 +179,55 @@ describe('<LyricsPanel />', () => {
     expect(pronunciation.style.color).toBe('')
   })
 
+  it('keeps timed translations on the main line lifecycle', () => {
+    const translationLyric = {
+      synced: true,
+      line: [{ start: 0, end: 1000, value: 'Translated phrase' }],
+      cueLine: [
+        {
+          index: 0,
+          start: 0,
+          end: 700,
+          value: 'Translated phrase',
+          cue: [
+            {
+              start: 0,
+              end: 150,
+              value: 'Translated',
+              byteStart: 0,
+              byteEnd: 9,
+            },
+            {
+              start: 150,
+              end: 700,
+              value: 'phrase',
+              byteStart: 11,
+              byteEnd: 16,
+            },
+          ],
+        },
+      ],
+    }
+
+    renderPanel({
+      mainLyric: tokenizedMainLyric,
+      pronunciationLyric: tokenizedPronunciationLyric,
+      translationLyric,
+      showPronunciation: true,
+      showTranslation: true,
+      audioInstance: { currentTime: 0.25, paused: true },
+    })
+
+    const group = screen.getByTestId('lyrics-line-group')
+    const translation = screen.getByText('Translated phrase')
+    expect(group).toHaveAttribute('data-active', 'true')
+    expect(translation).not.toHaveAttribute('data-lyrics-state')
+    expect(translation.style.backgroundImage).toBe('')
+    expect(
+      group.style.getPropertyValue('--lyrics-translation-active-color'),
+    ).not.toBe('')
+  })
+
   it('uses the same active and release lifecycle for all line-level layers', () => {
     const lyric = {
       synced: true,
