@@ -48,10 +48,25 @@ jobs:
       - name: Validate UI
         working-directory: ui
         run: |
-          npm run check-formatting
-          npm run lint
-          npm test
-          npm run build
+          set +e
+          {
+            npm run check-formatting
+            npm run lint
+            npm test
+            npm run build
+          } > /tmp/character-wave-validation.log 2>&1
+          status=$?
+          cat /tmp/character-wave-validation.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/character-wave-validation.log ../.github/character-wave-validation-error.txt
+            cd ..
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/character-wave-validation-error.txt
+            git commit -m "chore: capture character wave validation failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Commit fixes and remove temporary files
         run: |
           git config user.name "github-actions[bot]"
@@ -60,6 +75,7 @@ jobs:
           rm -f .github/scripts/apply-persistent-line-lift-and-character-wave.py
           rm -f .github/scripts/fix-character-wave-patch.py
           rm -f .github/character-wave-patch-error.txt
+          rm -f .github/character-wave-validation-error.txt
           git add -A
           git commit -m "fix(ui): add persistent lyric lift and character wave"
           git push origin HEAD:lyrics-sidebar-performance
