@@ -47,6 +47,68 @@ describe('lyricsTimeline', () => {
     expect(timeline.windows[1].valid).toBe(false)
   })
 
+  it('uses chronological timing independently from display order', () => {
+    const timeline = buildLyricsTimeline([
+      { start: 3000, end: 5000, value: 'Displayed first', tokens: [] },
+      { start: 1000, end: 4000, value: 'Displayed second', tokens: [] },
+      { start: 2000, value: 'Displayed third', tokens: [] },
+    ])
+    const cursor = new LyricTimelineCursor(timeline)
+
+    expect(timeline.windows[2].end).toBe(3000)
+    expect(cursor.update(2500, true)).toMatchObject({
+      indexes: [1, 2],
+      primaryIndex: 2,
+    })
+    expect(cursor.update(3500)).toMatchObject({
+      indexes: [0, 1],
+      primaryIndex: 0,
+    })
+  })
+
+  it('uses timed blank markers as boundaries without activating or scrolling to them', () => {
+    const timeline = buildLyricsTimeline([
+      {
+        start: 1000,
+        value: 'Before pause',
+        tokens: [],
+        renderable: true,
+      },
+      { start: 2000, value: '', tokens: [], renderable: false },
+      {
+        start: 4000,
+        end: 5000,
+        value: 'After pause',
+        tokens: [],
+        renderable: true,
+      },
+    ])
+    const cursor = new LyricTimelineCursor(timeline)
+
+    expect(timeline.windows[0].end).toBe(2000)
+    expect(timeline.windows[1]).toMatchObject({
+      renderable: false,
+      intervalValid: true,
+      valid: false,
+    })
+    expect(cursor.update(2500, true).indexes).toEqual([])
+    expect(timeline.scrollOrder.map((window) => window.lineIndex)).toEqual([
+      0, 2,
+    ])
+  })
+
+  it('bounds a final open line when media duration is unavailable', () => {
+    const timeline = buildLyricsTimeline([{ start: 7000, tokens: [] }], {
+      fallbackLineDurationMs: 8000,
+    })
+
+    expect(timeline.windows[0]).toMatchObject({
+      start: 7000,
+      end: 15000,
+      valid: true,
+    })
+  })
+
   it('keeps a start-only line active until the next timestamp', () => {
     const timeline = buildLyricsTimeline([
       { start: 1000, value: 'A lyric line', tokens: [] },

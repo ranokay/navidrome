@@ -348,6 +348,42 @@ describe('lyrics helpers', () => {
     ])
   })
 
+  it('preserves source display order independently from timestamps', () => {
+    const lines = buildKaraokeLines({
+      synced: true,
+      line: [
+        { start: 3000, value: 'Displayed first' },
+        { start: 1000, value: 'Displayed second' },
+        { start: 2000, value: 'Displayed third' },
+      ],
+    })
+
+    expect(lines.map((line) => line.value)).toEqual([
+      'Displayed first',
+      'Displayed second',
+      'Displayed third',
+    ])
+    expect(lines.map((line) => line.start)).toEqual([3000, 1000, 2000])
+  })
+
+  it('preserves timed blank rows as non-renderable timing markers', () => {
+    const lines = buildKaraokeLines({
+      synced: true,
+      line: [
+        { start: 1000, value: 'Before pause' },
+        { start: 2000, value: '' },
+        { start: 4000, value: 'After pause' },
+      ],
+    })
+
+    expect(lines).toHaveLength(3)
+    expect(lines[1]).toMatchObject({
+      start: 2000,
+      value: '',
+      renderable: false,
+    })
+  })
+
   it('estimates token windows when cue token timing is collapsed', () => {
     const lines = buildKaraokeLines({
       synced: true,

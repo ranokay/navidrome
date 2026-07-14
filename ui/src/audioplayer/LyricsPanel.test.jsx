@@ -112,6 +112,24 @@ describe('<LyricsPanel />', () => {
     window.matchMedia = originalMatchMedia
   })
 
+  it('does not render timed blank rows as empty lyric groups', () => {
+    renderPanel({
+      mainLyric: {
+        synced: true,
+        line: [
+          { start: 0, value: 'Before pause' },
+          { start: 1000, value: '' },
+          { start: 2000, value: 'After pause' },
+        ],
+      },
+      audioInstance: { currentTime: 1.5, paused: true },
+    })
+
+    expect(screen.getAllByTestId('lyrics-line-group')).toHaveLength(2)
+    expect(screen.getByText('Before pause')).toBeInTheDocument()
+    expect(screen.getByText('After pause')).toBeInTheDocument()
+  })
+
   it('renders main, stacked pronunciation, and translation in layer order', () => {
     renderPanel({
       mainLyric: tokenizedMainLyric,

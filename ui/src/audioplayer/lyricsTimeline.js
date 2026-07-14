@@ -21,6 +21,19 @@ const sameIndexes = (left, right) =>
   left.length === right.length &&
   left.every((value, index) => value === right[index])
 
+const getPrimaryActiveIndex = (timeline, indexes) =>
+  indexes.reduce((primaryIndex, lineIndex) => {
+    if (primaryIndex < 0) return lineIndex
+    const primary = timeline?.windows?.[primaryIndex]
+    const candidate = timeline?.windows?.[lineIndex]
+    if ((candidate?.start ?? -Infinity) !== (primary?.start ?? -Infinity)) {
+      return (candidate?.start ?? -Infinity) > (primary?.start ?? -Infinity)
+        ? lineIndex
+        : primaryIndex
+    }
+    return lineIndex > primaryIndex ? lineIndex : primaryIndex
+  }, -1)
+
 const earliestTokenStart = (line) => {
   const tokens = Array.isArray(line?.tokens) ? line.tokens : []
   let earliest = null
@@ -51,10 +64,23 @@ export const buildLyricsTimeline = (
     (line) => finiteTime(line?.start) ?? earliestTokenStart(line),
   )
   const nextTimedStarts = new Array(sourceLines.length).fill(null)
-  let nextStart = null
-  for (let index = sourceLines.length - 1; index >= 0; index -= 1) {
-    nextTimedStarts[index] = nextStart
-    if (starts[index] != null) nextStart = starts[index]
+  const timedEntries = starts
+    .map((start, lineIndex) => ({ start, lineIndex }))
+    .filter((entry) => entry.start != null)
+    .sort(
+      (left, right) =>
+        left.start - right.start || left.lineIndex - right.lineIndex,
+    )
+  let nextDistinctStart = null
+  for (let index = timedEntries.length - 1; index >= 0; ) {
+    const groupStart = timedEntries[index].start
+    let groupIndex = index
+    while (groupIndex >= 0 && timedEntries[groupIndex].start === groupStart) {
+      nextTimedStarts[timedEntries[groupIndex].lineIndex] = nextDistinctStart
+      groupIndex -= 1
+    }
+    nextDistinctStart = groupStart
+    index = groupIndex
   }
 
   const trackEnd = finiteTime(durationMs)
@@ -66,11 +92,15 @@ export const buildLyricsTimeline = (
       end = start + fallbackLineDurationMs
       if (trackEnd != null) end = Math.min(end, trackEnd)
     }
-    const valid = start != null && end != null && end > start
+    const renderable = line?.renderable !== false
+    const intervalValid = start != null && end != null && end > start
+    const valid = renderable && intervalValid
     return {
       lineIndex,
       start,
       end,
+      renderable,
+      intervalValid,
       valid,
       preRollStart:
         start == null ? null : Math.max(0, start - KARAOKE_SCROLL_PRE_ROLL_MS),
@@ -196,7 +226,7 @@ export class LyricTimelineCursor {
     this.lastIndexes = indexes
     this.result.indexes = indexes
     this.result.changed = changed
-    this.result.primaryIndex = indexes.at(-1) ?? -1
+    this.result.primaryIndex = getPrimaryActiveIndex(this.timeline, indexes)
     return this.result
   }
 }

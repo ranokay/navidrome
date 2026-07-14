@@ -278,8 +278,10 @@ const buildUniqueLayerMap = (mainLines, layerLines) => {
 
   const candidates = []
   for (let layerIndex = 0; layerIndex < layerLines.length; layerIndex += 1) {
+    if (layerLines[layerIndex]?.renderable === false) continue
     const layerWindow = getLayerMatchWindow(layerLines, layerIndex)
     for (let mainIndex = 0; mainIndex < mainLines.length; mainIndex += 1) {
+      if (mainLines[mainIndex]?.renderable === false) continue
       const mainWindow = getLayerMatchWindow(mainLines, mainIndex)
       let score = null
 
@@ -684,6 +686,7 @@ const LyricsPanel = ({
           }
         >
           {mainLines.map((line, idx) => {
+            if (line.renderable === false) return null
             const trLine = trByMainIndex[idx]
             const prLine = prByMainIndex[idx]
             const mainNextLineStart =

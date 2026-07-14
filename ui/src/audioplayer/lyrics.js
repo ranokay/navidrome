@@ -475,20 +475,12 @@ export const buildKaraokeLines = (structuredLyric) => {
         )
       : buildBaseKaraokeLines(baseLines, offset)
 
-  const renderableLines = lines.filter(
-    (line) => line.value || line.tokens.length > 0,
-  )
-  const hasUntimedLines = renderableLines.some((line) => line.start == null)
-  const normalized = renderableLines.sort((a, b) => {
-    if (hasUntimedLines) return a.index - b.index
-    if (a.start == null && b.start == null) return a.index - b.index
-    if (a.start == null) return 1
-    if (b.start == null) return -1
-    if (a.start !== b.start) return a.start - b.start
-    return a.index - b.index
-  })
-
-  return normalized
+  return lines
+    .map((line) => ({
+      ...line,
+      renderable: Boolean(line.value?.trim() || line.tokens.length > 0),
+    }))
+    .sort((a, b) => a.index - b.index)
 }
 
 export const resolveKaraokeTokenWindow = (
@@ -586,11 +578,13 @@ export const hasUsableKaraokeTiming = (lines) =>
   Array.isArray(lines) &&
   lines.some(
     (line) =>
-      toTime(line?.start) != null ||
-      (Array.isArray(line?.tokens) &&
-        line.tokens.some(
-          (token) => toTime(token?.start) != null || toTime(token?.end) != null,
-        )),
+      line?.renderable !== false &&
+      (toTime(line?.start) != null ||
+        (Array.isArray(line?.tokens) &&
+          line.tokens.some(
+            (token) =>
+              toTime(token?.start) != null || toTime(token?.end) != null,
+          ))),
   )
 
 export const findLayerLineIndexForMain = (mainLines, layerLines, mainIndex) => {
