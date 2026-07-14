@@ -105,11 +105,17 @@ const useStyles = makeStyles((theme) => ({
     '&[data-highlight-active="true"]': {
       transform: 'translateY(-2px)',
     },
-    '&[data-active="true"] $line, &[data-lifecycle="release"] $line': {
+    '&[data-active="true"] $line': {
       color: 'var(--lyrics-active-color)',
     },
-    '&[data-active="true"] $auxLine, &[data-lifecycle="release"] $auxLine': {
+    '&[data-active="true"] $auxLine': {
       color: 'var(--lyrics-active-color)',
+    },
+    '&[data-active="true"] $stackedPronunciation': {
+      color:
+        'var(--lyrics-pronunciation-active-color, var(--lyrics-pronunciation-idle-color, currentColor))',
+      WebkitTextFillColor:
+        'var(--lyrics-pronunciation-active-color, var(--lyrics-pronunciation-idle-color, currentColor))',
     },
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
@@ -180,6 +186,12 @@ const useStyles = makeStyles((theme) => ({
     maxWidth: '100%',
     overflowWrap: 'anywhere',
     whiteSpace: 'pre-wrap',
+    color: 'var(--lyrics-pronunciation-idle-color, currentColor)',
+    WebkitTextFillColor: 'var(--lyrics-pronunciation-idle-color, currentColor)',
+    transition: `color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
+    '@media (prefers-reduced-motion: reduce)': {
+      transition: 'none',
+    },
   },
   translationLine: {
     fontWeight: 600,

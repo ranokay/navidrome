@@ -34,17 +34,19 @@ const sameIndexes = (left, right) =>
   left.length === right.length &&
   left.every((value, index) => value === right[index])
 
-const rgba = (rgb, alpha) => {
-  const [r, g, b] = rgb || [255, 255, 255]
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
-
 const setProgress = (record, value) => {
   const next = Math.max(0, Math.min(1, value))
   if (record.progress != null && Math.abs(record.progress - next) < 0.001)
     return
   record.progress = next
   record.node.style.setProperty('--lyrics-progress', String(next))
+}
+
+const setTokenOpacity = (record, value) => {
+  const next = Math.max(0, Math.min(1, value))
+  if (record.opacity != null && Math.abs(record.opacity - next) < 0.001) return
+  record.opacity = next
+  record.node.style.opacity = String(next)
 }
 
 const setSolidTokenColor = (record, color) => {
@@ -65,25 +67,21 @@ const setGradientTokenColor = (record) => {
 }
 
 const applyTokenState = (record, state, progress = 0) => {
+  const previousState = record.state
   record.state = state
   record.node.dataset.lyricsState = state
   const presentation = record.presentation || {}
 
   if (state === 'active') {
-    if (presentation.useCrossfade) {
-      const alpha =
-        (presentation.futureAlpha ?? 0.34) +
-        ((presentation.activeAlpha ?? 1) - (presentation.futureAlpha ?? 0.34)) *
-          progress
-      setSolidTokenColor(record, rgba(presentation.rgb, alpha))
-      setProgress(record, progress)
-      return
+    if (previousState !== 'active') {
+      setTokenOpacity(record, 1)
+      setGradientTokenColor(record)
     }
-    setGradientTokenColor(record)
     setProgress(record, progress)
     return
   }
 
+  setTokenOpacity(record, 1)
   if (state === 'completed') {
     setSolidTokenColor(record, presentation.doneColor || 'currentColor')
     setProgress(record, 1)
@@ -92,6 +90,22 @@ const applyTokenState = (record, state, progress = 0) => {
 
   setSolidTokenColor(record, presentation.futureColor || 'currentColor')
   setProgress(record, 0)
+}
+
+const setTokenReleasePresentation = (record, progress) => {
+  const presentation = record.presentation || {}
+  const nextProgress = Math.max(0, Math.min(1, progress))
+  if (record.state !== 'release') {
+    applyTokenState(record, 'completed', 1)
+    record.state = 'release'
+    record.node.dataset.lyricsState = 'release'
+  }
+  const activeAlpha = Math.max(0.001, presentation.activeAlpha ?? 1)
+  const targetOpacity = Math.min(
+    1,
+    Math.max(0, (presentation.futureAlpha ?? 0.34) / activeAlpha),
+  )
+  setTokenOpacity(record, 1 + (targetOpacity - 1) * nextProgress)
 }
 
 const resetToken = (record, state = 'future') => {
@@ -157,8 +171,7 @@ const useLyricsTimeline = ({
     if (!node) return
     node.dataset.active = phase === 'active' ? 'true' : 'false'
     node.dataset.lifecycle = phase
-    node.dataset.highlightActive =
-      phase === 'active' || phase === 'release' ? 'true' : 'false'
+    node.dataset.highlightActive = phase === 'active' ? 'true' : 'false'
   }, [])
 
   const resetLineTokens = useCallback((lineIndex, state = 'future') => {
@@ -172,6 +185,13 @@ const useLyricsTimeline = ({
     lineTokenKeysRef.current.get(lineIndex)?.forEach((key) => {
       const record = tokenRecordsRef.current.get(key)
       if (record) setTokenPresentation(record, time)
+    })
+  }, [])
+
+  const updateLineReleaseTokens = useCallback((lineIndex, progress) => {
+    lineTokenKeysRef.current.get(lineIndex)?.forEach((key) => {
+      const record = tokenRecordsRef.current.get(key)
+      if (record) setTokenReleasePresentation(record, progress)
     })
   }, [])
 
@@ -214,7 +234,10 @@ const useLyricsTimeline = ({
             if (current < window.end + KARAOKE_LINE_RELEASE_MS) {
               releaseIndexesRef.current.add(window.lineIndex)
               setLineState(window.lineIndex, 'release')
-              updateLineTokens(window.lineIndex, window.end + lead)
+              updateLineReleaseTokens(
+                window.lineIndex,
+                (current - window.end) / KARAOKE_LINE_RELEASE_MS,
+              )
             } else {
               setLineState(window.lineIndex, 'idle')
               resetLineTokens(window.lineIndex, 'inactive-past')
@@ -232,7 +255,7 @@ const useLyricsTimeline = ({
           ) {
             releaseIndexesRef.current.add(lineIndex)
             setLineState(lineIndex, 'release')
-            updateLineTokens(lineIndex, window.end + lead)
+            updateLineReleaseTokens(lineIndex, 0)
           } else {
             setLineState(lineIndex, 'idle')
             resetLineTokens(lineIndex, 'inactive-past')
@@ -259,7 +282,12 @@ const useLyricsTimeline = ({
             lineIndex,
             current >= (window?.end ?? Infinity) ? 'inactive-past' : 'future',
           )
+          return
         }
+        updateLineReleaseTokens(
+          lineIndex,
+          (current - window.end) / KARAOKE_LINE_RELEASE_MS,
+        )
       })
 
       if (result.changed || forceSeek) publishActiveIndexes(result.indexes)
@@ -273,6 +301,7 @@ const useLyricsTimeline = ({
       resetLineTokens,
       setLineState,
       timeline.windows,
+      updateLineReleaseTokens,
       updateLineTokens,
     ],
   )
@@ -323,6 +352,7 @@ const useLyricsTimeline = ({
         window: descriptor.window,
         presentation: descriptor.presentation,
         progress: null,
+        opacity: null,
         state: null,
       }
       tokenRecordsRef.current.set(key, record)
@@ -344,9 +374,10 @@ const useLyricsTimeline = ({
           lastAppliedTimeRef.current >= lineWindow.end &&
           lastAppliedTimeRef.current < lineWindow.end + KARAOKE_LINE_RELEASE_MS
         ) {
-          setTokenPresentation(
+          setTokenReleasePresentation(
             record,
-            lineWindow.end + (reducedMotion ? 0 : KARAOKE_HIGHLIGHT_LEAD_MS),
+            (lastAppliedTimeRef.current - lineWindow.end) /
+              KARAOKE_LINE_RELEASE_MS,
           )
         } else {
           resetToken(

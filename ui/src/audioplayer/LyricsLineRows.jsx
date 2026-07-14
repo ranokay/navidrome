@@ -86,8 +86,6 @@ const buildTokenData = (token, rgb) => {
   return {
     style: {
       '--lyrics-progress': 0,
-      transition:
-        'opacity 220ms cubic-bezier(0.22, 1, 0.36, 1), color 220ms cubic-bezier(0.22, 1, 0.36, 1), -webkit-text-fill-color 220ms cubic-bezier(0.22, 1, 0.36, 1)',
       color: futureColor,
       WebkitTextFillColor: futureColor,
       backgroundImage: 'none',
@@ -451,8 +449,14 @@ export const KaraokeStackedLineRow = memo(
                 }
                 style={
                   pronunciationTokenData?.style || {
-                    color: pronunciationStyle?.color,
-                    WebkitTextFillColor: pronunciationStyle?.color,
+                    '--lyrics-pronunciation-idle-color':
+                      pronunciationStyle?.color,
+                    '--lyrics-pronunciation-active-color':
+                      pronunciationStyle?.['--lyrics-active-color'] ||
+                      pronunciationStyle?.color,
+                    color: 'var(--lyrics-pronunciation-idle-color)',
+                    WebkitTextFillColor:
+                      'var(--lyrics-pronunciation-idle-color)',
                     backgroundImage: 'none',
                     ...buildStaticEmphasisStyle(
                       pronunciationToken || segment.token,

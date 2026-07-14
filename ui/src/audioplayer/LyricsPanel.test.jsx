@@ -166,12 +166,21 @@ describe('<LyricsPanel />', () => {
         line: [{ start: 0, end: 1000, value: 'wo zong yao gei yi xie bie de' }],
       },
       showPronunciation: true,
+      audioInstance: { currentTime: 0.2, paused: true },
     })
 
     expect(screen.getByText('我总要给一些别的')).toBeInTheDocument()
+    const pronunciation = screen.getByText('wo zong yao gei yi xie bie de')
+    const group = pronunciation.closest('[data-testid="lyrics-line-group"]')
+    expect(group).toHaveAttribute('data-active', 'true')
     expect(
-      screen.getByText('wo zong yao gei yi xie bie de'),
-    ).toBeInTheDocument()
+      pronunciation.style.getPropertyValue(
+        '--lyrics-pronunciation-active-color',
+      ),
+    ).not.toBe('')
+    expect(pronunciation.style.color).toBe(
+      'var(--lyrics-pronunciation-idle-color)',
+    )
   })
 
   it('renders unsynced lyrics as static selectable text', () => {
@@ -254,9 +263,10 @@ describe('<LyricsPanel />', () => {
     expect(token).toHaveAttribute('data-lyrics-state', 'active')
     expect(token.style.backgroundImage).toContain('linear-gradient')
     expect(token.style.color).toBe('transparent')
+    expect(token.style.transition).toBe('')
   })
 
-  it('keeps completed tokens during release then clears stale state', () => {
+  it('starts unhighlighting as soon as a line ends then clears stale state', () => {
     const { rerender } = renderPanel({
       mainLyric: tokenizedMainLyric,
       audioInstance: { currentTime: 1.1, paused: true },
@@ -266,9 +276,11 @@ describe('<LyricsPanel />', () => {
     const token = screen.getByText('Main')
     expect(group).toHaveAttribute('data-active', 'false')
     expect(group).toHaveAttribute('data-lifecycle', 'release')
-    expect(group).toHaveAttribute('data-highlight-active', 'true')
-    expect(token).toHaveAttribute('data-lyrics-state', 'completed')
+    expect(group).toHaveAttribute('data-highlight-active', 'false')
+    expect(token).toHaveAttribute('data-lyrics-state', 'release')
     expect(token.style.backgroundImage).toBe('none')
+    expect(Number(token.style.opacity)).toBeLessThan(1)
+    expect(Number(token.style.opacity)).toBeGreaterThan(0.3)
 
     rerender(
       <ThemeProvider theme={theme}>
@@ -283,6 +295,7 @@ describe('<LyricsPanel />', () => {
     expect(group).toHaveAttribute('data-lifecycle', 'idle')
     expect(group).toHaveAttribute('data-highlight-active', 'false')
     expect(token).toHaveAttribute('data-lyrics-state', 'inactive-past')
+    expect(token.style.opacity).toBe('1')
   })
 
   it('tracks overlapping lines while selecting one primary line', () => {
