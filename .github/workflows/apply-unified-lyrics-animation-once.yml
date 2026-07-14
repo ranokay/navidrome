@@ -48,10 +48,25 @@ jobs:
       - name: Validate UI
         working-directory: ui
         run: |
-          npm run check-formatting
-          npm run lint
-          npm test
-          npm run build
+          set +e
+          {
+            npm run check-formatting
+            npm run lint
+            npm test
+            npm run build
+          } > /tmp/unified-lyrics-validation.log 2>&1
+          status=$?
+          cat /tmp/unified-lyrics-validation.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/unified-lyrics-validation.log ../.github/unified-lyrics-validation-error.txt
+            cd ..
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/unified-lyrics-validation-error.txt
+            git commit -m "chore: capture unified lyrics validation failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Commit fixes and remove temporary files
         run: |
           git config user.name "github-actions[bot]"
@@ -60,6 +75,7 @@ jobs:
           git rm .github/scripts/apply-unified-lyrics-animation.py
           git rm .github/scripts/fix-unified-patch-script.py
           git rm -f .github/unified-lyrics-fix-error.txt
+          git rm -f .github/unified-lyrics-validation-error.txt
           git add ui/src/audioplayer
           git commit -m "fix(ui): unify lyrics layer animation lifecycle"
           git push origin HEAD:lyrics-sidebar-performance
