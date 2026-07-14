@@ -34,16 +34,32 @@ jobs:
       - name: Validate UI
         working-directory: ui
         run: |
-          npm run check-formatting
-          npm run lint
-          npm test
-          npm run build
+          set +e
+          {
+            npm run check-formatting
+            npm run lint
+            npm test
+            npm run build
+          } > /tmp/lyric-layer-validation.log 2>&1
+          status=$?
+          cat /tmp/lyric-layer-validation.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/lyric-layer-validation.log ../.github/lyric-layer-validation-error.txt
+            cd ..
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/lyric-layer-validation-error.txt
+            git commit -m "chore: capture lyric layer validation failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Commit fixes and remove temporary files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f .github/workflows/unify-translation-and-line-fades-once.yml
           rm -f .github/scripts/unify-translation-and-line-fades.py
+          rm -f .github/lyric-layer-validation-error.txt
           git add -A
           git commit -m "fix(ui): align lyric layer highlight timing"
           git push origin HEAD:lyrics-sidebar-performance
