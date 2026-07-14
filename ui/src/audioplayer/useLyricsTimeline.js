@@ -105,23 +105,20 @@ const applyTokenState = (record, state, progress = 0) => {
   record.node.dataset.lyricsState = state
   const presentation = record.presentation || {}
 
-  if (state === 'active') {
-    if (previousState !== 'active') {
+  if (state === 'active' || state === 'completed') {
+    const wasGradientState =
+      previousState === 'active' || previousState === 'completed'
+    if (!wasGradientState) {
       setTokenOpacity(record, 1)
       setGradientTokenColor(record)
     }
-    setProgress(record, progress)
-    setCharacterLift(record, progress)
+    const nextProgress = state === 'completed' ? 1 : progress
+    setProgress(record, nextProgress)
+    setCharacterLift(record, nextProgress)
     return
   }
 
   setTokenOpacity(record, 1)
-  if (state === 'completed') {
-    setSolidTokenColor(record, presentation.doneColor || 'currentColor')
-    setProgress(record, 1)
-    setCharacterLift(record, 1)
-    return
-  }
 
   setSolidTokenColor(record, presentation.futureColor || 'currentColor')
   setProgress(record, 0)

@@ -155,6 +155,53 @@ describe('useLyricsTimeline', () => {
     expect(result.current.primaryIndex).toBe(1)
   })
 
+  it('keeps the same gradient paint when an active word completes', () => {
+    const audio = createAudio({ currentTime: 0.25, paused: true })
+    const { result } = renderHook(() =>
+      useLyricsTimeline({
+        lines,
+        audioInstance: audio,
+        visible: true,
+        reducedMotion: false,
+      }),
+    )
+    const tokenNode = document.createElement('span')
+    Array.from('first').forEach((character) => {
+      const node = document.createElement('span')
+      node.dataset.lyricsCharacter = 'true'
+      node.textContent = character
+      tokenNode.appendChild(node)
+    })
+
+    act(() => {
+      result.current.registerToken(
+        '0:stable-completion',
+        {
+          lineIndex: 0,
+          window: { start: 0, end: 500 },
+          presentation,
+        },
+        tokenNode,
+      )
+    })
+
+    const activeBackground = tokenNode.style.backgroundImage
+    expect(tokenNode.dataset.lyricsState).toBe('active')
+    expect(tokenNode.style.color).toBe('transparent')
+
+    act(() => result.current.syncNow(600, true))
+
+    expect(tokenNode.dataset.lyricsState).toBe('completed')
+    expect(tokenNode.style.backgroundImage).toBe(activeBackground)
+    expect(tokenNode.style.color).toBe('transparent')
+    expect(tokenNode.style.webkitTextFillColor).toBe('transparent')
+    tokenNode
+      .querySelectorAll('[data-lyrics-character="true"]')
+      .forEach((character) =>
+        expect(character.style.transform).toBe('translateY(-1.5000px)'),
+      )
+  })
+
   it('uses smooth subpixel character transforms for long token durations', () => {
     const audio = createAudio({ currentTime: 1, duration: 5, paused: true })
     const longLines = [
