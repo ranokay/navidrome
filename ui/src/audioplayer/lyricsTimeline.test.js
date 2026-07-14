@@ -47,22 +47,16 @@ describe('lyricsTimeline', () => {
     expect(timeline.windows[1].valid).toBe(false)
   })
 
-  it('ends line-timed lyrics before the next timestamp when no end exists', () => {
+  it('keeps a start-only line active until the next timestamp', () => {
     const timeline = buildLyricsTimeline([
-      {
-        start: 1000,
-        value: 'A short lyric line',
-        timingMode: 'line',
-        tokens: [],
-      },
-      { start: 5000, end: 6000, timingMode: 'line', tokens: [] },
+      { start: 1000, value: 'A lyric line', tokens: [] },
+      { start: 5000, end: 6000, tokens: [] },
     ])
     const cursor = new LyricTimelineCursor(timeline)
 
-    expect(timeline.windows[0].end).toBeGreaterThan(1000)
-    expect(timeline.windows[0].end).toBeLessThan(5000)
-    expect(cursor.update(1500, true).indexes).toEqual([0])
-    expect(cursor.update(timeline.windows[0].end + 1).indexes).toEqual([])
+    expect(timeline.windows[0].end).toBe(5000)
+    expect(cursor.update(4999, true).indexes).toEqual([0])
+    expect(cursor.update(5000).indexes).toEqual([1])
   })
 
   it('caps a final open line with track duration', () => {

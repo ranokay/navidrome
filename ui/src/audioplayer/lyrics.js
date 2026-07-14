@@ -297,7 +297,6 @@ const buildBaseKaraokeLine = (line, index, offset = 0) => ({
   index,
   start: applyTimeOffset(line?.start, offset),
   end: applyTimeOffset(line?.end, offset),
-  timingMode: 'line',
   value: typeof line?.value === 'string' ? line.value : '',
   tokens: [],
   lanes: [],
@@ -403,7 +402,6 @@ const buildLineFromCueLineGroup = (index, group, baseLines, offset = 0) => {
     agentId: first.agentId,
     agentName: first.agentName,
     agentRole: first.agentRole,
-    timingMode: tokens.length > 0 ? 'token' : 'line',
     tokens,
     lanes,
   }

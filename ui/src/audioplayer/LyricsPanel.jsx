@@ -34,6 +34,8 @@ import {
 } from './lyricsScroll'
 import useLyricsTimeline from './useLyricsTimeline'
 
+const KARAOKE_LAYER_COLOR_TRANSITION = `color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`
+
 const useStyles = makeStyles((theme) => ({
   root: {
     height: '100%',
@@ -135,7 +137,7 @@ const useStyles = makeStyles((theme) => ({
     letterSpacing: 0,
     color: 'var(--lyrics-main-current-color, currentColor)',
     WebkitTextFillColor: 'var(--lyrics-main-current-color, currentColor)',
-    transition: `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
+    transition: KARAOKE_LAYER_COLOR_TRANSITION,
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
     },
@@ -155,7 +157,7 @@ const useStyles = makeStyles((theme) => ({
     color: 'var(--lyrics-translation-current-color, currentColor)',
     WebkitTextFillColor:
       'var(--lyrics-translation-current-color, currentColor)',
-    transition: `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
+    transition: KARAOKE_LAYER_COLOR_TRANSITION,
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
     },
@@ -196,7 +198,7 @@ const useStyles = makeStyles((theme) => ({
     color: 'var(--lyrics-pronunciation-current-color, currentColor)',
     WebkitTextFillColor:
       'var(--lyrics-pronunciation-current-color, currentColor)',
-    transition: `color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
+    transition: KARAOKE_LAYER_COLOR_TRANSITION,
     '&[data-timed="true"]': {
       transition: 'none',
     },
