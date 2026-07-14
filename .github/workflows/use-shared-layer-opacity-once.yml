@@ -34,16 +34,32 @@ jobs:
       - name: Validate UI
         working-directory: ui
         run: |
-          npm run check-formatting
-          npm run lint
-          npm test
-          npm run build
+          set +e
+          {
+            npm run check-formatting
+            npm run lint
+            npm test
+            npm run build
+          } > /tmp/shared-opacity-validation.log 2>&1
+          status=$?
+          cat /tmp/shared-opacity-validation.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/shared-opacity-validation.log ../.github/shared-opacity-validation-error.txt
+            cd ..
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/shared-opacity-validation-error.txt
+            git commit -m "chore: capture shared opacity validation failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Commit fixes and remove temporary files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f .github/workflows/use-shared-layer-opacity-once.yml
           rm -f .github/scripts/use-shared-layer-opacity.py
+          rm -f .github/shared-opacity-validation-error.txt
           git add -A
           git commit -m "fix(ui): synchronize lyric layer fades"
           git push origin HEAD:lyrics-sidebar-performance
