@@ -24,7 +24,20 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - name: Apply lyrics polish fixes
-        run: python3 .github/scripts/fix-lyrics-wave-and-static-polish.py
+        run: |
+          set +e
+          python3 .github/scripts/fix-lyrics-wave-and-static-polish.py > /tmp/lyrics-polish-patch.log 2>&1
+          status=$?
+          cat /tmp/lyrics-polish-patch.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/lyrics-polish-patch.log .github/lyrics-polish-patch-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/lyrics-polish-patch-error.txt
+            git commit -m "chore: capture lyrics polish patch failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Install dependencies
         working-directory: ui
         run: npm ci
@@ -44,6 +57,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f .github/workflows/fix-lyrics-wave-and-static-polish-once.yml
           rm -f .github/scripts/fix-lyrics-wave-and-static-polish.py
+          rm -f .github/lyrics-polish-patch-error.txt
           git add -A
           git commit -m "fix(ui): polish lyric wave and static presentation"
           git push origin HEAD:lyrics-sidebar-performance
