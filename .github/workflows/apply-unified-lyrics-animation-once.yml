@@ -24,7 +24,20 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - name: Apply unified animation fixes
-        run: python3 .github/scripts/apply-unified-lyrics-animation.py
+        run: |
+          set +e
+          python3 .github/scripts/apply-unified-lyrics-animation.py > /tmp/unified-lyrics-fix.log 2>&1
+          status=$?
+          cat /tmp/unified-lyrics-fix.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/unified-lyrics-fix.log .github/unified-lyrics-fix-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/unified-lyrics-fix-error.txt
+            git commit -m "chore: capture unified lyrics patch failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Install dependencies
         working-directory: ui
         run: npm ci
@@ -44,6 +57,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/apply-unified-lyrics-animation-once.yml
           git rm .github/scripts/apply-unified-lyrics-animation.py
+          git rm -f .github/unified-lyrics-fix-error.txt
           git add ui/src/audioplayer
           git commit -m "fix(ui): unify lyrics layer animation lifecycle"
           git push origin HEAD:lyrics-sidebar-performance
