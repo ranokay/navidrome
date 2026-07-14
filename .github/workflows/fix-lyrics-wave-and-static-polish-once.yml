@@ -26,6 +26,7 @@ jobs:
       - name: Apply lyrics polish fixes
         run: |
           set +e
+          # Retry after narrowing the padding dependency replacement.
           python3 .github/scripts/fix-lyrics-wave-and-static-polish.py > /tmp/lyrics-polish-patch.log 2>&1
           status=$?
           cat /tmp/lyrics-polish-patch.log
