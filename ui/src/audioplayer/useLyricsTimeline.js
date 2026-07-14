@@ -8,10 +8,8 @@ import {
 } from 'react'
 import {
   KARAOKE_CLOCK_DRIFT_RESET_MS,
-  KARAOKE_CLOCK_RESET_THRESHOLD_MS,
   KARAOKE_HIGHLIGHT_LEAD_MS,
   KARAOKE_LINE_RELEASE_MS,
-  KARAOKE_MONOTONIC_JITTER_MS,
 } from './lyricsKaraokeConstants'
 import {
   buildLyricsTimeline,
@@ -477,11 +475,7 @@ const useLyricsTimeline = ({
         anchorPerfMs = now
       }
       const backwards = lastFrameTime - current
-      if (backwards > KARAOKE_CLOCK_RESET_THRESHOLD_MS) {
-        current = observed
-        anchorAudioMs = observed
-        anchorPerfMs = now
-      } else if (backwards > 0 && backwards <= KARAOKE_MONOTONIC_JITTER_MS) {
+      if (backwards > 0) {
         current = lastFrameTime
       }
       lastFrameTime = Math.max(0, current)

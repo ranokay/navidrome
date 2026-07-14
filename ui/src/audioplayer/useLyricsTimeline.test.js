@@ -151,6 +151,51 @@ describe('useLyricsTimeline', () => {
     expect(result.current.primaryIndex).toBe(1)
   })
 
+  it('keeps interpolated playback time monotonic between coarse media updates', () => {
+    let frameCallback = null
+    let now = 0
+    window.requestAnimationFrame.mockImplementation((callback) => {
+      frameCallback = callback
+      return 1
+    })
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+
+    const audio = createAudio({ currentTime: 0.2, paused: false })
+    const { result } = renderHook(() =>
+      useLyricsTimeline({
+        lines,
+        audioInstance: audio,
+        visible: true,
+        reducedMotion: false,
+      }),
+    )
+    const tokenNode = document.createElement('span')
+    act(() => {
+      result.current.registerToken(
+        '0:monotonic',
+        {
+          lineIndex: 0,
+          window: { start: 0, end: 1000 },
+          presentation,
+        },
+        tokenNode,
+      )
+    })
+
+    now = 100
+    act(() => frameCallback())
+    const firstProgress = Number(
+      tokenNode.style.getPropertyValue('--lyrics-progress'),
+    )
+    now = 180
+    act(() => frameCallback())
+    const secondProgress = Number(
+      tokenNode.style.getPropertyValue('--lyrics-progress'),
+    )
+
+    expect(secondProgress).toBeGreaterThanOrEqual(firstProgress)
+  })
+
   it('starts and stops requestAnimationFrame with playback visibility', () => {
     const audio = createAudio({ currentTime: 0.25, paused: true })
     renderHook(() =>

@@ -28,44 +28,29 @@ const toneEmphasisRGB = (rgb) =>
 const getTokenRGB = (token, rgb) =>
   isEmphasisRole(token) ? toneEmphasisRGB(rgb) : rgb
 
-const toneEmphasisColor = (color) => {
-  const rgb = parseColorRGB(color)
-  if (!rgb) return color
-
-  const alpha = String(color).match(/rgba?\([^)]*?,\s*([\d.]+)\s*\)$/)?.[1]
-  return tokenColor(toneEmphasisRGB(rgb), alpha == null ? 1 : Number(alpha))
+const stripLayerColors = (style) => {
+  const result = { ...(style || {}) }
+  delete result.color
+  delete result.WebkitTextFillColor
+  delete result['--lyrics-active-color']
+  return result
 }
 
 const buildLineStyle = (line, style) => {
   const emphasisStyle = buildEmphasisStyle(line)
-  if (!emphasisStyle) return style
-
-  const emphasisColor = style?.color ? toneEmphasisColor(style.color) : null
   return {
-    ...style,
+    ...stripLayerColors(style),
     ...emphasisStyle,
-    ...(emphasisColor
-      ? {
-          color: emphasisColor,
-          WebkitTextFillColor: emphasisColor,
-        }
-      : {}),
+    ...(emphasisStyle ? { filter: `brightness(${EMPHASIS_TONE})` } : {}),
   }
 }
 
-const buildStaticEmphasisStyle = (token, color) => {
+const buildStaticEmphasisStyle = (token) => {
   const emphasisStyle = buildEmphasisStyle(token)
   if (!emphasisStyle) return undefined
-
-  const emphasisColor = color ? toneEmphasisColor(color) : null
   return {
     ...emphasisStyle,
-    ...(emphasisColor
-      ? {
-          color: emphasisColor,
-          WebkitTextFillColor: emphasisColor,
-        }
-      : {}),
+    filter: `brightness(${EMPHASIS_TONE})`,
   }
 }
 
@@ -144,12 +129,7 @@ export const KaraokeLineRow = memo(
 
           const window = windows[segment.tokenIndex]
           const key = `${lineIndex}:${rowKey}:${segment.tokenIndex}:main`
-          const tokenData = buildTokenData(
-            segment.token,
-            tokenRGB,
-            window,
-            segment.text,
-          )
+          const tokenData = buildTokenData(segment.token, tokenRGB)
           return (
             <span
               key={`token-${idx}-${window?.start ?? 'na'}`}
@@ -381,7 +361,7 @@ export const KaraokeStackedLineRow = memo(
             : null
           const mainKey = `${lineIndex}:${rowKey}:${segment.tokenIndex}:main`
           const mainTokenData = segment.token
-            ? buildTokenData(segment.token, tokenRGB, mainWindow, segment.text)
+            ? buildTokenData(segment.token, tokenRGB)
             : null
           const mainText = segment.token ? (
             <span
@@ -404,7 +384,7 @@ export const KaraokeStackedLineRow = memo(
             <span
               key={`main-${idx}`}
               className={classes.stackedMainText}
-              style={buildStaticEmphasisStyle(segment.token, style?.color)}
+              style={buildStaticEmphasisStyle(segment.token)}
             >
               {segment.text}
             </span>
@@ -421,8 +401,6 @@ export const KaraokeStackedLineRow = memo(
             ? buildTokenData(
                 pronunciationToken || segment.token,
                 pronunciationRGB,
-                pronunciationWindow,
-                segment.pronunciation,
               )
             : null
           return (
@@ -449,18 +427,9 @@ export const KaraokeStackedLineRow = memo(
                 }
                 style={
                   pronunciationTokenData?.style || {
-                    '--lyrics-pronunciation-idle-color':
-                      pronunciationStyle?.color,
-                    '--lyrics-pronunciation-active-color':
-                      pronunciationStyle?.['--lyrics-active-color'] ||
-                      pronunciationStyle?.color,
-                    color: 'var(--lyrics-pronunciation-idle-color)',
-                    WebkitTextFillColor:
-                      'var(--lyrics-pronunciation-idle-color)',
                     backgroundImage: 'none',
                     ...buildStaticEmphasisStyle(
                       pronunciationToken || segment.token,
-                      pronunciationStyle?.color,
                     ),
                   }
                 }

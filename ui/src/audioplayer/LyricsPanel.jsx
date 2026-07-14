@@ -100,22 +100,24 @@ const useStyles = makeStyles((theme) => ({
   lineGroup: {
     width: '100%',
     borderRadius: theme.shape.borderRadius,
+    '--lyrics-main-current-color':
+      'var(--lyrics-main-idle-color, currentColor)',
+    '--lyrics-pronunciation-current-color':
+      'var(--lyrics-pronunciation-idle-color, currentColor)',
+    '--lyrics-translation-current-color':
+      'var(--lyrics-translation-idle-color, currentColor)',
     transform: 'translateY(0)',
     transition: `transform ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
     '&[data-highlight-active="true"]': {
       transform: 'translateY(-2px)',
     },
-    '&[data-active="true"] $line': {
-      color: 'var(--lyrics-active-color)',
-    },
-    '&[data-active="true"] $auxLine': {
-      color: 'var(--lyrics-active-color)',
-    },
-    '&[data-active="true"] $stackedPronunciation': {
-      color:
+    '&[data-active="true"]': {
+      '--lyrics-main-current-color':
+        'var(--lyrics-main-active-color, var(--lyrics-main-idle-color, currentColor))',
+      '--lyrics-pronunciation-current-color':
         'var(--lyrics-pronunciation-active-color, var(--lyrics-pronunciation-idle-color, currentColor))',
-      WebkitTextFillColor:
-        'var(--lyrics-pronunciation-active-color, var(--lyrics-pronunciation-idle-color, currentColor))',
+      '--lyrics-translation-current-color':
+        'var(--lyrics-translation-active-color, var(--lyrics-translation-idle-color, currentColor))',
     },
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
@@ -131,7 +133,9 @@ const useStyles = makeStyles((theme) => ({
     overflowWrap: 'anywhere',
     whiteSpace: 'pre-wrap',
     letterSpacing: 0,
-    transition: `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
+    color: 'var(--lyrics-main-current-color, currentColor)',
+    WebkitTextFillColor: 'var(--lyrics-main-current-color, currentColor)',
+    transition: `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
     },
@@ -148,7 +152,10 @@ const useStyles = makeStyles((theme) => ({
     overflowWrap: 'anywhere',
     whiteSpace: 'pre-wrap',
     letterSpacing: 0,
-    transition: `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
+    color: 'var(--lyrics-translation-current-color, currentColor)',
+    WebkitTextFillColor:
+      'var(--lyrics-translation-current-color, currentColor)',
+    transition: `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
     },
@@ -186,8 +193,9 @@ const useStyles = makeStyles((theme) => ({
     maxWidth: '100%',
     overflowWrap: 'anywhere',
     whiteSpace: 'pre-wrap',
-    color: 'var(--lyrics-pronunciation-idle-color, currentColor)',
-    WebkitTextFillColor: 'var(--lyrics-pronunciation-idle-color, currentColor)',
+    color: 'var(--lyrics-pronunciation-current-color, currentColor)',
+    WebkitTextFillColor:
+      'var(--lyrics-pronunciation-current-color, currentColor)',
     transition: `color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
@@ -309,6 +317,21 @@ const buildUniqueLayerMap = (mainLines, layerLines) => {
 
 const getLineLanes = (line) =>
   Array.isArray(line?.lanes) && line.lanes.length > 0 ? line.lanes : [line]
+
+const buildLineGroupStyle = (canSeekLine, layerStyles) => ({
+  cursor: canSeekLine ? 'pointer' : undefined,
+  '--lyrics-main-idle-color': layerStyles.main.color,
+  '--lyrics-main-active-color':
+    layerStyles.main['--lyrics-active-color'] || layerStyles.main.color,
+  '--lyrics-pronunciation-idle-color': layerStyles.pronunciation.color,
+  '--lyrics-pronunciation-active-color':
+    layerStyles.pronunciation['--lyrics-active-color'] ||
+    layerStyles.pronunciation.color,
+  '--lyrics-translation-idle-color': layerStyles.translation.color,
+  '--lyrics-translation-active-color':
+    layerStyles.translation['--lyrics-active-color'] ||
+    layerStyles.translation.color,
+})
 
 const usePrefersReducedMotion = () => {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
@@ -656,7 +679,7 @@ const LyricsPanel = ({
                   idx === scrollTargetIndex ? 'true' : 'false'
                 }
                 data-testid="lyrics-line-group"
-                style={{ cursor: canSeekLine ? 'pointer' : undefined }}
+                style={buildLineGroupStyle(canSeekLine, layerStyles)}
                 role={canSeekLine ? 'button' : undefined}
                 tabIndex={canSeekLine ? 0 : undefined}
                 onClick={() => seekToLine(line)}

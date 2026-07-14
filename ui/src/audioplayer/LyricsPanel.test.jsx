@@ -174,13 +174,82 @@ describe('<LyricsPanel />', () => {
     const group = pronunciation.closest('[data-testid="lyrics-line-group"]')
     expect(group).toHaveAttribute('data-active', 'true')
     expect(
-      pronunciation.style.getPropertyValue(
-        '--lyrics-pronunciation-active-color',
-      ),
+      group.style.getPropertyValue('--lyrics-pronunciation-active-color'),
     ).not.toBe('')
-    expect(pronunciation.style.color).toBe(
-      'var(--lyrics-pronunciation-idle-color)',
+    expect(pronunciation.style.color).toBe('')
+  })
+
+  it('uses the same active and release lifecycle for all line-level layers', () => {
+    const lyric = {
+      synced: true,
+      line: [{ start: 0, end: 1000, value: 'Main line' }],
+    }
+    const pronunciationLyric = {
+      synced: true,
+      line: [{ start: 0, end: 1000, value: 'main pronunciation' }],
+    }
+    const translationLyric = {
+      synced: true,
+      line: [{ start: 0, end: 1000, value: 'translated line' }],
+    }
+    const { rerender } = renderPanel({
+      mainLyric: lyric,
+      pronunciationLyric,
+      translationLyric,
+      showPronunciation: true,
+      showTranslation: true,
+      audioInstance: { currentTime: 0.5, paused: true },
+    })
+
+    const group = screen.getByTestId('lyrics-line-group')
+    const pronunciation = screen.getByText('main pronunciation')
+    const translation = screen.getByText('translated line')
+    expect(group).toHaveAttribute('data-active', 'true')
+    expect(group).toHaveAttribute('data-highlight-active', 'true')
+    expect(group.style.getPropertyValue('--lyrics-main-active-color')).not.toBe(
+      '',
     )
+    expect(
+      group.style.getPropertyValue('--lyrics-pronunciation-active-color'),
+    ).not.toBe('')
+    expect(
+      group.style.getPropertyValue('--lyrics-translation-active-color'),
+    ).not.toBe('')
+    expect(pronunciation.style.color).toBe('')
+    expect(translation.style.color).toBe('')
+
+    rerender(
+      <ThemeProvider theme={theme}>
+        <LyricsPanel
+          visible
+          mainLyric={lyric}
+          pronunciationLyric={pronunciationLyric}
+          translationLyric={translationLyric}
+          showPronunciation
+          showTranslation
+          audioInstance={{ currentTime: 1.1, paused: true }}
+        />
+      </ThemeProvider>,
+    )
+
+    expect(group).toHaveAttribute('data-active', 'false')
+    expect(group).toHaveAttribute('data-lifecycle', 'release')
+    expect(group).toHaveAttribute('data-highlight-active', 'false')
+  })
+
+  it('keeps timed pronunciation on the stable gradient path', () => {
+    renderPanel({
+      mainLyric: tokenizedMainLyric,
+      pronunciationLyric: tokenizedPronunciationLyric,
+      showPronunciation: true,
+      audioInstance: { currentTime: 0.25, paused: true },
+    })
+
+    const pronunciation = screen.getAllByTestId('lyrics-pronunciation-token')[0]
+    expect(pronunciation).toHaveAttribute('data-lyrics-state', 'active')
+    expect(pronunciation.style.backgroundImage).toContain('linear-gradient')
+    expect(pronunciation.style.color).toBe('transparent')
+    expect(pronunciation.style.transition).toBe('')
   })
 
   it('renders unsynced lyrics as static selectable text', () => {
