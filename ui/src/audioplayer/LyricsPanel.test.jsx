@@ -4,7 +4,9 @@ import { ThemeProvider, createTheme } from '@material-ui/core/styles'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import LyricsPanel from './LyricsPanel'
 import {
+  KARAOKE_ANIMATION_MS,
   KARAOKE_DESKTOP_ACTIVE_LINE_ANCHOR_RATIO,
+  KARAOKE_LINE_ENTER_MS,
   KARAOKE_MANUAL_SCROLL_PAUSE_MS,
 } from './lyricsKaraokeConstants'
 import { buildSegmentsFromLine } from './lyricsSegments'
@@ -282,6 +284,34 @@ describe('<LyricsPanel />', () => {
     expect(
       group.style.getPropertyValue('--lyrics-translation-active-color'),
     ).not.toBe('')
+  })
+
+  it('uses a quick line enter and the shared release duration', () => {
+    const { rerender } = renderPanel({
+      mainLyric,
+      audioInstance: { currentTime: 0.5, paused: true },
+    })
+
+    const group = screen.getByTestId('lyrics-line-group')
+    expect(group).toHaveAttribute('data-highlight-active', 'true')
+    expect(window.getComputedStyle(group).transitionDuration).toBe(
+      `${KARAOKE_LINE_ENTER_MS}ms`,
+    )
+
+    rerender(
+      <ThemeProvider theme={theme}>
+        <LyricsPanel
+          visible
+          mainLyric={mainLyric}
+          audioInstance={{ currentTime: 1.1, paused: true }}
+        />
+      </ThemeProvider>,
+    )
+
+    expect(group).toHaveAttribute('data-highlight-active', 'false')
+    expect(window.getComputedStyle(group).transitionDuration).toBe(
+      `${KARAOKE_ANIMATION_MS}ms`,
+    )
   })
 
   it('uses the same active and release lifecycle for all line-level layers', () => {
