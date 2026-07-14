@@ -1,0 +1,49 @@
+name: Revert LRC end inference and unify line fade
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/revert-lrc-end-and-unify-line-fade-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: lyrics-sidebar-performance
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Apply timing and transition fixes
+        run: python3 .github/scripts/revert-lrc-end-and-unify-line-fade.py
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Format changed files
+        working-directory: ui
+        run: npx prettier --write src/audioplayer/LyricsPanel.jsx src/audioplayer/lyrics.js src/audioplayer/lyricsTimeline.js src/audioplayer/lyricsTimeline.test.js
+      - name: Validate UI
+        working-directory: ui
+        run: |
+          npm run check-formatting
+          npm run lint
+          npm test
+          npm run build
+      - name: Commit fixes and remove temporary files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/revert-lrc-end-and-unify-line-fade-once.yml
+          rm -f .github/scripts/revert-lrc-end-and-unify-line-fade.py
+          git add -A
+          git commit -m "fix(ui): restore LRC timing and unify line fades"
+          git push origin HEAD:lyrics-sidebar-performance
