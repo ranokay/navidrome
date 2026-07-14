@@ -24,7 +24,20 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - name: Apply timing and transition fixes
-        run: python3 .github/scripts/revert-lrc-end-and-unify-line-fade.py
+        run: |
+          set +e
+          python3 .github/scripts/revert-lrc-end-and-unify-line-fade.py > /tmp/lrc-revert.log 2>&1
+          status=$?
+          cat /tmp/lrc-revert.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/lrc-revert.log .github/lrc-revert-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/lrc-revert-error.txt
+            git commit -m "chore: capture LRC revert failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Install dependencies
         working-directory: ui
         run: npm ci
@@ -44,6 +57,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f .github/workflows/revert-lrc-end-and-unify-line-fade-once.yml
           rm -f .github/scripts/revert-lrc-end-and-unify-line-fade.py
+          rm -f .github/lrc-revert-error.txt
           git add -A
           git commit -m "fix(ui): restore LRC timing and unify line fades"
           git push origin HEAD:lyrics-sidebar-performance
