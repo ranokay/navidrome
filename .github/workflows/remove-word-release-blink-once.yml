@@ -1,0 +1,49 @@
+name: Remove word release blink
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/remove-word-release-blink-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: lyrics-sidebar-performance
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Apply release blink fix
+        run: python3 .github/scripts/remove-word-release-blink.py
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Format changed files
+        working-directory: ui
+        run: npx prettier --write src/audioplayer/useLyricsTimeline.js src/audioplayer/useLyricsTimeline.test.js
+      - name: Validate UI
+        working-directory: ui
+        run: |
+          npm run check-formatting
+          npm run lint
+          npm test
+          npm run build
+      - name: Commit fixes and remove temporary files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/remove-word-release-blink-once.yml
+          rm -f .github/scripts/remove-word-release-blink.py
+          git add -A
+          git commit -m "fix(ui): prevent word highlight release blink"
+          git push origin HEAD:lyrics-sidebar-performance
