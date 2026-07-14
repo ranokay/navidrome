@@ -234,20 +234,86 @@ describe('useLyricsTimeline', () => {
 
     act(() => result.current.syncNow(1219, true))
     const gradient = tokenNode.style.backgroundImage
-    const releaseOpacity = Number(tokenNode.style.opacity)
+    const releaseAlpha = Number(
+      tokenNode.style.getPropertyValue('--lyrics-token-active-alpha'),
+    )
     expect(tokenNode.dataset.lyricsState).toBe('release')
     expect(tokenNode.style.color).toBe('transparent')
+    expect(tokenNode.style.opacity).toBe('1')
 
     act(() => result.current.syncNow(1220, true))
 
-    const pastOpacity = Number(tokenNode.style.opacity)
+    const pastAlpha = Number(
+      tokenNode.style.getPropertyValue('--lyrics-token-active-alpha'),
+    )
     expect(tokenNode.dataset.lyricsState).toBe('inactive-past')
     expect(tokenNode.style.backgroundImage).toBe(gradient)
     expect(tokenNode.style.color).toBe('transparent')
     expect(tokenNode.style.webkitTextFillColor).toBe('transparent')
-    expect(Math.abs(pastOpacity - releaseOpacity)).toBeLessThan(0.01)
-    expect(pastOpacity).toBeCloseTo(presentation.futureAlpha, 5)
+    expect(tokenNode.style.opacity).toBe('1')
+    expect(Math.abs(pastAlpha - releaseAlpha)).toBeLessThan(0.01)
+    expect(pastAlpha).toBeCloseTo(presentation.futureAlpha, 5)
     expect(tokenNode.style.getPropertyValue('--lyrics-progress')).toBe('1')
+  })
+
+  it('starts every character at rest and only moves it upward', () => {
+    const audio = createAudio({ currentTime: 0.879, duration: 5, paused: true })
+    const delayedLines = [
+      {
+        start: 0,
+        end: 4000,
+        tokens: [{ start: 1000, end: 4000, value: 'super' }],
+      },
+    ]
+    const { result } = renderHook(() =>
+      useLyricsTimeline({
+        lines: delayedLines,
+        audioInstance: audio,
+        visible: true,
+        reducedMotion: false,
+      }),
+    )
+    const tokenNode = document.createElement('span')
+    Array.from('super').forEach((character) => {
+      const node = document.createElement('span')
+      node.dataset.lyricsCharacter = 'true'
+      node.textContent = character
+      tokenNode.appendChild(node)
+    })
+
+    act(() => {
+      result.current.registerToken(
+        '0:one-way-rise',
+        {
+          lineIndex: 0,
+          window: { start: 1000, end: 4000 },
+          presentation,
+        },
+        tokenNode,
+      )
+    })
+
+    const characters = Array.from(
+      tokenNode.querySelectorAll('[data-lyrics-character="true"]'),
+    )
+    characters.forEach((character) =>
+      expect(character.style.transform).toBe(''),
+    )
+
+    act(() => result.current.syncNow(900, true))
+
+    expect(characters[0].style.transform).toMatch(
+      /^translateY\(-\d+\.\d{4}px\)$/,
+    )
+    characters
+      .slice(1)
+      .forEach((character) => expect(character.style.transform).toBe(''))
+    characters.forEach((character) => {
+      const offset = Number.parseFloat(
+        character.style.transform.match(/-?\d+\.\d+/)?.[0] || '0',
+      )
+      expect(offset).toBeLessThanOrEqual(0)
+    })
   })
 
   it('uses smooth subpixel character transforms for long token durations', () => {

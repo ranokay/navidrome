@@ -67,8 +67,18 @@ const setCharacterLift = (record, progress) => {
       0,
       Math.min(1, (progress - start) / Math.max(0.001, riseWindow)),
     )
-    const offset = -KARAOKE_CHARACTER_LIFT_PX * smootherStep(local)
-    const nextTransform = `translateY(${offset.toFixed(4)}px)`
+    const lift = Math.max(
+      0,
+      Math.min(
+        KARAOKE_CHARACTER_LIFT_PX,
+        KARAOKE_CHARACTER_LIFT_PX * smootherStep(local),
+      ),
+    )
+    if (lift < 0.00005) {
+      if (node.style.transform) node.style.removeProperty('transform')
+      return
+    }
+    const nextTransform = `translateY(-${lift.toFixed(4)}px)`
     if (node.style.transform !== nextTransform) {
       node.style.transform = nextTransform
     }
@@ -82,12 +92,12 @@ const setTokenOpacity = (record, value) => {
   record.node.style.opacity = String(next)
 }
 
-const setSolidTokenColor = (record, color) => {
-  record.node.style.color = color
-  record.node.style.webkitTextFillColor = color
-  record.node.style.backgroundImage = 'none'
-  record.node.style.backgroundClip = ''
-  record.node.style.webkitBackgroundClip = ''
+const setTokenActiveAlpha = (record, value) => {
+  const next = Math.max(0, Math.min(1, value))
+  if (record.activeAlpha != null && Math.abs(record.activeAlpha - next) < 0.001)
+    return
+  record.activeAlpha = next
+  record.node.style.setProperty('--lyrics-token-active-alpha', String(next))
 }
 
 const setGradientTokenColor = (record) => {
@@ -99,15 +109,14 @@ const setGradientTokenColor = (record) => {
   record.node.style.webkitBackgroundClip = 'text'
 }
 
-const getInactiveTokenOpacity = (presentation = {}) => {
-  const activeAlpha = Math.max(0.001, presentation.activeAlpha ?? 1)
-  return Math.min(
-    1,
-    Math.max(0, (presentation.futureAlpha ?? 0.34) / activeAlpha),
-  )
-}
+const getInactiveTokenAlpha = (presentation = {}) =>
+  Math.min(1, Math.max(0, presentation.futureAlpha ?? 0.34))
+
+const getActiveTokenAlpha = (presentation = {}) =>
+  Math.min(1, Math.max(0, presentation.activeAlpha ?? 1))
 
 const isGradientTokenState = (state) =>
+  state === 'future' ||
   state === 'active' ||
   state === 'completed' ||
   state === 'release' ||
@@ -119,28 +128,22 @@ const applyTokenState = (record, state, progress = 0) => {
   record.node.dataset.lyricsState = state
   const presentation = record.presentation || {}
 
-  if (
-    state === 'active' ||
-    state === 'completed' ||
-    state === 'inactive-past'
-  ) {
-    if (!isGradientTokenState(previousState)) {
-      setGradientTokenColor(record)
-    }
-    const nextProgress = state === 'active' ? progress : 1
-    setProgress(record, nextProgress)
-    setCharacterLift(record, nextProgress)
-    setTokenOpacity(
-      record,
-      state === 'inactive-past' ? getInactiveTokenOpacity(presentation) : 1,
-    )
-    return
+  if (!isGradientTokenState(previousState)) {
+    setGradientTokenColor(record)
   }
 
+  const isFuture = state === 'future'
+  const isPast = state === 'inactive-past'
+  const nextProgress = isFuture ? 0 : state === 'active' ? progress : 1
+  setProgress(record, nextProgress)
+  setCharacterLift(record, nextProgress)
   setTokenOpacity(record, 1)
-  setSolidTokenColor(record, presentation.futureColor || 'currentColor')
-  setProgress(record, 0)
-  setCharacterLift(record, 0)
+  setTokenActiveAlpha(
+    record,
+    isPast
+      ? getInactiveTokenAlpha(presentation)
+      : getActiveTokenAlpha(presentation),
+  )
 }
 
 const setTokenReleasePresentation = (record, progress) => {
@@ -151,8 +154,13 @@ const setTokenReleasePresentation = (record, progress) => {
     record.state = 'release'
     record.node.dataset.lyricsState = 'release'
   }
-  const targetOpacity = getInactiveTokenOpacity(presentation)
-  setTokenOpacity(record, 1 + (targetOpacity - 1) * nextProgress)
+  const activeAlpha = getActiveTokenAlpha(presentation)
+  const targetAlpha = getInactiveTokenAlpha(presentation)
+  setTokenOpacity(record, 1)
+  setTokenActiveAlpha(
+    record,
+    activeAlpha + (targetAlpha - activeAlpha) * nextProgress,
+  )
 }
 
 const resetToken = (record, state = 'future') => {
@@ -404,6 +412,7 @@ const useLyricsTimeline = ({
           : Array.from(node.querySelectorAll('[data-lyrics-character="true"]')),
         progress: null,
         opacity: null,
+        activeAlpha: null,
         state: null,
       }
       tokenRecordsRef.current.set(key, record)

@@ -319,6 +319,20 @@ describe('<LyricsPanel />', () => {
     )
   })
 
+  it('renders future timed tokens with the same gradient paint mode', () => {
+    renderPanel({
+      mainLyric: tokenizedMainLyric,
+      audioInstance: { currentTime: 0, paused: true },
+    })
+
+    const futureToken = screen.getAllByTestId('lyrics-token')[1]
+    expect(futureToken).toHaveAttribute('data-lyrics-state', 'future')
+    expect(futureToken.style.color).toBe('transparent')
+    expect(futureToken.style.webkitTextFillColor).toBe('transparent')
+    expect(futureToken.style.backgroundImage).not.toBe('none')
+    expect(futureToken.style.opacity).toBe('1')
+  })
+
   it('uses only the per-character rise for token-timed lyrics', () => {
     renderPanel({
       mainLyric: tokenizedMainLyric,

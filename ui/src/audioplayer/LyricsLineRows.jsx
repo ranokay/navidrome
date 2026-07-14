@@ -88,6 +88,10 @@ const buildTokenData = (token, rgb) => {
   const tonedRGB = getTokenRGB(token, rgb)
   const futureColor = tokenColor(tonedRGB, TOKEN_FUTURE_ALPHA)
   const doneColor = tokenColor(tonedRGB, TOKEN_ACTIVE_ALPHA)
+  const gradientDoneColor = tokenColor(
+    tonedRGB,
+    'var(--lyrics-token-active-alpha, 1)',
+  )
   const softColor = tokenColor(
     tonedRGB,
     TOKEN_FUTURE_ALPHA + (TOKEN_ACTIVE_ALPHA - TOKEN_FUTURE_ALPHA) * 0.58,
@@ -96,14 +100,18 @@ const buildTokenData = (token, rgb) => {
   const activeStop = `calc(var(--lyrics-progress) * ${sweepRange}% - ${TOKEN_WIPE_SOFT_SPREAD_PCT}%)`
   const softStop = `calc(var(--lyrics-progress) * ${sweepRange}% - ${TOKEN_WIPE_EDGE_PCT}%)`
   const futureStop = `calc(var(--lyrics-progress) * ${sweepRange}%)`
-  const gradient = `linear-gradient(90deg, ${doneColor} 0%, ${doneColor} ${activeStop}, ${softColor} ${softStop}, ${futureColor} ${futureStop}, ${futureColor} 100%)`
+  const gradient = `linear-gradient(90deg, ${gradientDoneColor} 0%, ${gradientDoneColor} ${activeStop}, ${softColor} ${softStop}, ${futureColor} ${futureStop}, ${futureColor} 100%)`
 
   return {
     style: {
       '--lyrics-progress': 0,
-      color: futureColor,
-      WebkitTextFillColor: futureColor,
-      backgroundImage: 'none',
+      '--lyrics-token-active-alpha': TOKEN_ACTIVE_ALPHA,
+      color: 'transparent',
+      WebkitTextFillColor: 'transparent',
+      backgroundImage: gradient,
+      backgroundSize: '100% 100%',
+      backgroundClip: 'text',
+      WebkitBackgroundClip: 'text',
       ...buildEmphasisStyle(token),
     },
     presentation: {
