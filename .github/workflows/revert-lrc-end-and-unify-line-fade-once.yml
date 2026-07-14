@@ -26,7 +26,6 @@ jobs:
       - name: Apply timing and transition fixes
         run: |
           set +e
-          # Retry with exact matching for the two shared main/translation rules.
           python3 .github/scripts/revert-lrc-end-and-unify-line-fade.py > /tmp/lrc-revert.log 2>&1
           status=$?
           cat /tmp/lrc-revert.log
@@ -48,10 +47,25 @@ jobs:
       - name: Validate UI
         working-directory: ui
         run: |
-          npm run check-formatting
-          npm run lint
-          npm test
-          npm run build
+          set +e
+          {
+            npm run check-formatting
+            npm run lint
+            npm test
+            npm run build
+          } > /tmp/lrc-revert-validation.log 2>&1
+          status=$?
+          cat /tmp/lrc-revert-validation.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/lrc-revert-validation.log ../.github/lrc-revert-validation-error.txt
+            cd ..
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/lrc-revert-validation-error.txt
+            git commit -m "chore: capture LRC revert validation failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Commit fixes and remove temporary files
         run: |
           git config user.name "github-actions[bot]"
@@ -59,6 +73,7 @@ jobs:
           rm -f .github/workflows/revert-lrc-end-and-unify-line-fade-once.yml
           rm -f .github/scripts/revert-lrc-end-and-unify-line-fade.py
           rm -f .github/lrc-revert-error.txt
+          rm -f .github/lrc-revert-validation-error.txt
           git add -A
           git commit -m "fix(ui): restore LRC timing and unify line fades"
           git push origin HEAD:lyrics-sidebar-performance
