@@ -117,7 +117,7 @@ const useStyles = makeStyles((theme) => ({
     '&[role="button"]:hover, &[role="button"]:focus-visible': {
       backgroundColor: colorWithAlpha(theme.palette.text.primary, 0.055),
     },
-    '&[data-raised="true"]': {
+    '&[data-raised="true"][data-line-motion="line"]': {
       transform: `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
       transition: `transform ${KARAOKE_LINE_ENTER_MS}ms ${KARAOKE_LINE_MOTION_EASING}, background-color 150ms ${KARAOKE_LINE_MOTION_EASING}`,
     },
@@ -707,6 +707,9 @@ const LyricsPanel = ({
             const showTr = shouldShowAuxLine(line, trLine)
             const showPr = shouldShowAuxLine(line, prLine)
             const lineLanes = getLineLanes(line)
+            const usesCharacterRise = lineLanes.some(
+              (lane) => Array.isArray(lane?.tokens) && lane.tokens.length > 0,
+            )
             const canSeekLine = Boolean(audioInstance && line.start != null)
             const isActiveLine = activeIndexSet.has(idx)
             const isStaticLine = !hasTimedMainLines
@@ -719,6 +722,7 @@ const LyricsPanel = ({
                     : undefined
                 }
                 className={classes.lineGroup}
+                data-line-motion={usesCharacterRise ? 'character' : 'line'}
                 data-active={isStaticLine || isActiveLine ? 'true' : 'false'}
                 {...(isStaticLine
                   ? {

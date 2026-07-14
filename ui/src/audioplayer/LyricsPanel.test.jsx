@@ -297,6 +297,7 @@ describe('<LyricsPanel />', () => {
     const activeStyle = window.getComputedStyle(group)
     expect(group).toHaveAttribute('data-highlight-active', 'true')
     expect(group).toHaveAttribute('data-raised', 'true')
+    expect(group).toHaveAttribute('data-line-motion', 'line')
     expect(activeStyle.transform).toBe(`translateY(-${KARAOKE_LINE_LIFT_PX}px)`)
     expect(activeStyle.transitionDuration).toBe(`${KARAOKE_LINE_ENTER_MS}ms`)
 
@@ -316,6 +317,26 @@ describe('<LyricsPanel />', () => {
     expect(releasedStyle.transform).toBe(
       `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
     )
+  })
+
+  it('uses only the per-character rise for token-timed lyrics', () => {
+    renderPanel({
+      mainLyric: tokenizedMainLyric,
+      audioInstance: { currentTime: 0.25, paused: true },
+    })
+
+    const group = screen.getByTestId('lyrics-line-group')
+    const firstCharacter = screen
+      .getAllByTestId('lyrics-token')[0]
+      .querySelector('[data-lyrics-character="true"]')
+
+    expect(group).toHaveAttribute('data-raised', 'true')
+    expect(group).toHaveAttribute('data-line-motion', 'character')
+    expect(window.getComputedStyle(group).transform).toBe('translateY(0)')
+    expect(firstCharacter.style.top).toBe(
+      `-${KARAOKE_LINE_LIFT_PX.toFixed(3)}px`,
+    )
+    expect(KARAOKE_CHARACTER_LIFT_PX).toBe(KARAOKE_LINE_LIFT_PX)
   })
 
   it('lifts timed main and pronunciation graphemes with token progress', () => {
