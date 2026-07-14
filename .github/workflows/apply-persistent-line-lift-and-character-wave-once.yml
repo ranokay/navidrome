@@ -26,6 +26,7 @@ jobs:
       - name: Apply persistent lift and character wave
         run: |
           set +e
+          python3 .github/scripts/fix-character-wave-patch.py
           python3 .github/scripts/apply-persistent-line-lift-and-character-wave.py > /tmp/character-wave-patch.log 2>&1
           status=$?
           cat /tmp/character-wave-patch.log
@@ -57,6 +58,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f .github/workflows/apply-persistent-line-lift-and-character-wave-once.yml
           rm -f .github/scripts/apply-persistent-line-lift-and-character-wave.py
+          rm -f .github/scripts/fix-character-wave-patch.py
           rm -f .github/character-wave-patch-error.txt
           git add -A
           git commit -m "fix(ui): add persistent lyric lift and character wave"
