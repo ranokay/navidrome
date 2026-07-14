@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/home/runner/work/navidrome/navidrome/.github/scripts/apply-persistent-line-lift-and-character-wave.py", line 245, in <module>
+    text = replace_once(
+           ^^^^^^^^^^^^^
+  File "/home/runner/work/navidrome/navidrome/.github/scripts/apply-persistent-line-lift-and-character-wave.py", line 7, in replace_once
+    raise RuntimeError(f'{label}: expected one match, found {count}')
+RuntimeError: stacked pronunciation wave text: expected one match, found 0
