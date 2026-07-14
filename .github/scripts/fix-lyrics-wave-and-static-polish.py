@@ -8,7 +8,6 @@ def replace_once(text, old, new, label):
     return text.replace(old, new, 1)
 
 
-# Broaden the character rise overlap so the motion travels continuously.
 path = Path('ui/src/audioplayer/lyricsKaraokeConstants.js')
 text = path.read_text()
 text = replace_once(
@@ -20,8 +19,6 @@ text = replace_once(
 path.write_text(text)
 
 
-# Use relative top positioning instead of transforms. This keeps inline glyph
-# layout stable and makes every character move only upward.
 path = Path('ui/src/audioplayer/useLyricsTimeline.js')
 text = path.read_text()
 old = """const setCharacterLift = (record, progress) => {
@@ -70,7 +67,6 @@ text = replace_once(text, old, new, 'monotonic character wave')
 path.write_text(text)
 
 
-# Preserve natural inline spacing and avoid creating an inline-block for spaces.
 path = Path('ui/src/audioplayer/LyricsLineRows.jsx')
 text = path.read_text()
 old = """const renderWaveText = (text, enabled, className) => {
@@ -109,9 +105,6 @@ text = replace_once(text, old, new, 'stable grapheme rendering')
 path.write_text(text)
 
 
-# Apply the wave class to every timed main/pronunciation rendering path, keep
-# unsynced lyrics fully highlighted, avoid React/imperative lifecycle overlap,
-# add hover affordance, and calculate bottom reading room for every lyric type.
 path = Path('ui/src/audioplayer/LyricsPanel.jsx')
 text = path.read_text()
 text = replace_once(
@@ -192,12 +185,17 @@ text = replace_once(
 )
 text = replace_once(
     text,
-    """    hasTimedMainLines,
+    """  }, [
+    activeLineAnchorRatio,
+    hasTimedMainLines,
     layoutVersion,
+    mainLines.length,
+    visible,
+  ])
 """,
-    """    layoutVersion,
+    """  }, [activeLineAnchorRatio, layoutVersion, mainLines.length, visible])
 """,
-    'remove timed padding dependency',
+    'padding dependencies',
 )
 text = replace_once(
     text,
@@ -233,7 +231,6 @@ text = replace_once(
 """,
     'single lifecycle owner and static highlight',
 )
-# Four rendering paths previously did not all receive the wave class.
 text = replace_once(
     text,
     """                          tokenClassName={classes.token}
@@ -272,8 +269,6 @@ text = replace_once(
 path.write_text(text)
 
 
-# Regression tests for all rendering paths, monotonic top motion, static
-# highlighting, and untimed bottom room.
 path = Path('ui/src/audioplayer/LyricsPanel.test.jsx')
 text = path.read_text()
 text = replace_once(
@@ -337,10 +332,12 @@ text = replace_once(
 """,
     'unsynced highlighted assertions',
 )
-old = """      expect(lines).toHaveAttribute('data-scroll-end-padding', '290')
+text = replace_once(
+    text,
+    """      expect(lines).toHaveAttribute('data-scroll-end-padding', '290')
     } finally {
-"""
-new = """      expect(lines).toHaveAttribute('data-scroll-end-padding', '290')
+""",
+    """      expect(lines).toHaveAttribute('data-scroll-end-padding', '290')
       unmount()
 
       renderPanel({
@@ -357,6 +354,7 @@ new = """      expect(lines).toHaveAttribute('data-scroll-end-padding', '290')
         String(expectedDesktop),
       )
     } finally {
-"""
-text = replace_once(text, old, new, 'untimed bottom room test')
+""",
+    'untimed bottom room test',
+)
 path.write_text(text)
