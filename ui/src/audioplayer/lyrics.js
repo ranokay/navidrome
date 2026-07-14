@@ -297,6 +297,7 @@ const buildBaseKaraokeLine = (line, index, offset = 0) => ({
   index,
   start: applyTimeOffset(line?.start, offset),
   end: applyTimeOffset(line?.end, offset),
+  timingMode: 'line',
   value: typeof line?.value === 'string' ? line.value : '',
   tokens: [],
   lanes: [],
@@ -402,6 +403,7 @@ const buildLineFromCueLineGroup = (index, group, baseLines, offset = 0) => {
     agentId: first.agentId,
     agentName: first.agentName,
     agentRole: first.agentRole,
+    timingMode: tokens.length > 0 ? 'token' : 'line',
     tokens,
     lanes,
   }
@@ -487,13 +489,6 @@ export const buildKaraokeLines = (structuredLyric) => {
     if (a.start !== b.start) return a.start - b.start
     return a.index - b.index
   })
-
-  for (let i = 0; i < normalized.length; i += 1) {
-    if (normalized[i].end == null) {
-      const nextStart = normalized[i + 1]?.start
-      if (nextStart != null) normalized[i].end = nextStart
-    }
-  }
 
   return normalized
 }

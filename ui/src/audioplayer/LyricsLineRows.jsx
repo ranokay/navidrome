@@ -414,6 +414,7 @@ export const KaraokeStackedLineRow = memo(
                 className={classes.stackedPronunciation}
                 data-testid="lyrics-pronunciation-token"
                 data-lyrics-state="future"
+                data-timed={pronunciationWindow ? 'true' : 'false'}
                 ref={
                   pronunciationWindow
                     ? tokenRef({

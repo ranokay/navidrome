@@ -249,6 +249,7 @@ describe('<LyricsPanel />', () => {
     expect(pronunciation).toHaveAttribute('data-lyrics-state', 'active')
     expect(pronunciation.style.backgroundImage).toContain('linear-gradient')
     expect(pronunciation.style.color).toBe('transparent')
+    expect(pronunciation).toHaveAttribute('data-timed', 'true')
     expect(pronunciation.style.transition).toBe('')
   })
 

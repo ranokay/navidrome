@@ -197,6 +197,9 @@ const useStyles = makeStyles((theme) => ({
     WebkitTextFillColor:
       'var(--lyrics-pronunciation-current-color, currentColor)',
     transition: `color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
+    '&[data-timed="true"]': {
+      transition: 'none',
+    },
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
     },

@@ -42,6 +42,32 @@ const latestExplicitTokenEnd = (line) => {
   return latest
 }
 
+const estimateLineSpokenDuration = (line) => {
+  const compactLength = Array.from(
+    String(line?.value || '').replace(/\s+/g, ''),
+  ).length
+  const words = String(line?.value || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length
+  const estimate = 480 + words * 285 + compactLength * 18
+  return Math.max(800, Math.min(6000, estimate))
+}
+
+const inferLineTimedEnd = (line, start, nextStart, trackEnd) => {
+  const estimatedEnd = start + estimateLineSpokenDuration(line)
+  const boundary = nextStart ?? trackEnd
+  if (boundary == null) return estimatedEnd
+  const interval = Math.max(0, boundary - start)
+  if (interval <= 0) return boundary
+  const releaseGap = Math.min(420, Math.max(120, interval * 0.14))
+  const latestEnd = Math.max(
+    start + Math.min(650, interval),
+    boundary - releaseGap,
+  )
+  return Math.min(estimatedEnd, latestEnd, boundary)
+}
+
 export const buildLyricsTimeline = (
   lines,
   { durationMs = null, fallbackLineDurationMs = 8000 } = {},
@@ -61,6 +87,9 @@ export const buildLyricsTimeline = (
   const windows = sourceLines.map((line, lineIndex) => {
     const start = starts[lineIndex]
     let end = finiteTime(line?.end) ?? latestExplicitTokenEnd(line)
+    if (end == null && start != null && line?.timingMode === 'line') {
+      end = inferLineTimedEnd(line, start, nextTimedStarts[lineIndex], trackEnd)
+    }
     if (end == null) end = nextTimedStarts[lineIndex]
     if (end == null && start != null) {
       end = start + fallbackLineDurationMs

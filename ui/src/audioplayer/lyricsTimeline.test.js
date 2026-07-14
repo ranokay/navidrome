@@ -47,6 +47,24 @@ describe('lyricsTimeline', () => {
     expect(timeline.windows[1].valid).toBe(false)
   })
 
+  it('ends line-timed lyrics before the next timestamp when no end exists', () => {
+    const timeline = buildLyricsTimeline([
+      {
+        start: 1000,
+        value: 'A short lyric line',
+        timingMode: 'line',
+        tokens: [],
+      },
+      { start: 5000, end: 6000, timingMode: 'line', tokens: [] },
+    ])
+    const cursor = new LyricTimelineCursor(timeline)
+
+    expect(timeline.windows[0].end).toBeGreaterThan(1000)
+    expect(timeline.windows[0].end).toBeLessThan(5000)
+    expect(cursor.update(1500, true).indexes).toEqual([0])
+    expect(cursor.update(timeline.windows[0].end + 1).indexes).toEqual([])
+  })
+
   it('caps a final open line with track duration', () => {
     const timeline = buildLyricsTimeline([{ start: 7000, tokens: [] }], {
       durationMs: 10000,
