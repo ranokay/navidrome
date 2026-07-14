@@ -113,10 +113,13 @@ const useStyles = makeStyles((theme) => ({
       'var(--lyrics-translation-idle-color, currentColor)',
     '--lyrics-layer-opacity': 0.49,
     transform: 'translateY(0)',
-    transition: 'none',
+    transition: `background-color 150ms ${KARAOKE_LINE_MOTION_EASING}`,
+    '&[role="button"]:hover, &[role="button"]:focus-visible': {
+      backgroundColor: colorWithAlpha(theme.palette.text.primary, 0.055),
+    },
     '&[data-raised="true"]': {
       transform: `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
-      transition: `transform ${KARAOKE_LINE_ENTER_MS}ms ${KARAOKE_LINE_MOTION_EASING}`,
+      transition: `transform ${KARAOKE_LINE_ENTER_MS}ms ${KARAOKE_LINE_MOTION_EASING}, background-color 150ms ${KARAOKE_LINE_MOTION_EASING}`,
     },
     '&[data-active="true"]': {
       '--lyrics-main-current-color':
@@ -133,11 +136,12 @@ const useStyles = makeStyles((theme) => ({
     },
   },
   waveCharacter: {
-    display: 'inline-block',
-    willChange: 'transform',
-    transform: 'translateY(0)',
+    position: 'relative',
+    top: 0,
+    display: 'inline',
+    willChange: 'top',
     '@media (prefers-reduced-motion: reduce)': {
-      transform: 'none !important',
+      top: '0 !important',
       willChange: 'auto',
     },
   },
@@ -236,6 +240,8 @@ const useStyles = makeStyles((theme) => ({
   token: {
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
+    fontKerning: 'none',
+    fontVariantLigatures: 'none',
   },
   voiceLanes: {
     display: 'flex',
@@ -573,7 +579,7 @@ const LyricsPanel = ({
 
   useLayoutEffect(() => {
     const body = bodyRef.current
-    if (!visible || !body || !hasTimedMainLines) {
+    if (!visible || !body) {
       setScrollEndPadding(0)
       return
     }
@@ -581,13 +587,7 @@ const LyricsPanel = ({
     setScrollEndPadding((current) =>
       current === nextPadding ? current : nextPadding,
     )
-  }, [
-    activeLineAnchorRatio,
-    hasTimedMainLines,
-    layoutVersion,
-    mainLines.length,
-    visible,
-  ])
+  }, [activeLineAnchorRatio, layoutVersion, mainLines.length, visible])
 
   useLayoutEffect(() => {
     const body = bodyRef.current
@@ -709,14 +709,24 @@ const LyricsPanel = ({
             const lineLanes = getLineLanes(line)
             const canSeekLine = Boolean(audioInstance && line.start != null)
             const isActiveLine = activeIndexSet.has(idx)
+            const isStaticLine = !hasTimedMainLines
             return (
               <div
                 key={`line-${line.index}-${line.start ?? idx}`}
-                ref={(node) => registerLine(idx, node)}
+                ref={
+                  hasTimedMainLines
+                    ? (node) => registerLine(idx, node)
+                    : undefined
+                }
                 className={classes.lineGroup}
-                data-active={isActiveLine ? 'true' : 'false'}
-                data-lifecycle={isActiveLine ? 'active' : 'idle'}
-                data-raised={isActiveLine ? 'true' : 'false'}
+                data-active={isStaticLine || isActiveLine ? 'true' : 'false'}
+                {...(isStaticLine
+                  ? {
+                      'data-lifecycle': 'active',
+                      'data-highlight-active': 'true',
+                      'data-raised': 'false',
+                    }
+                  : {})}
                 aria-current={idx === activeIndex ? 'true' : undefined}
                 data-scroll-target={
                   idx === scrollTargetIndex ? 'true' : 'false'
@@ -770,6 +780,7 @@ const LyricsPanel = ({
                           className={laneClassName}
                           style={layerStyles.main}
                           tokenClassName={classes.token}
+                          waveCharacterClassName={classes.waveCharacter}
                           classes={classes}
                           registerToken={registerToken}
                           rowKey={rowKey}
@@ -804,6 +815,7 @@ const LyricsPanel = ({
                     })}
                     style={layerStyles.main}
                     tokenClassName={classes.token}
+                    waveCharacterClassName={classes.waveCharacter}
                     classes={classes}
                     registerToken={registerToken}
                     rowKey="main"
@@ -818,6 +830,7 @@ const LyricsPanel = ({
                     })}
                     style={layerStyles.main}
                     tokenClassName={classes.token}
+                    waveCharacterClassName={classes.waveCharacter}
                     registerToken={registerToken}
                     rowKey="main"
                   />

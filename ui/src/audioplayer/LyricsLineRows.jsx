@@ -31,17 +31,19 @@ const splitGraphemes = (value) => {
 
 const renderWaveText = (text, enabled, className) => {
   if (!enabled) return text
-  return splitGraphemes(text).map((character, index) => (
-    <span
-      key={`${index}-${character}`}
-      aria-hidden="true"
-      className={className}
-      data-lyrics-character="true"
-      data-whitespace={/^\s+$/.test(character) ? 'true' : 'false'}
-    >
-      {character}
-    </span>
-  ))
+  return splitGraphemes(text).map((character, index) => {
+    if (/^\s+$/.test(character)) return character
+    return (
+      <span
+        key={`${index}-${character}`}
+        aria-hidden="true"
+        className={className}
+        data-lyrics-character="true"
+      >
+        {character}
+      </span>
+    )
+  })
 }
 
 const tokenColor = (rgb, alpha) => {

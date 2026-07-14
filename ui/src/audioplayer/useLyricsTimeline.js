@@ -45,22 +45,24 @@ const setProgress = (record, value) => {
 const smoothStep = (value) => value * value * (3 - 2 * value)
 
 const setCharacterLift = (record, progress) => {
-  const characters = record.characters || []
+  const characters = (record.characters || []).filter(
+    (node) => node.dataset.whitespace !== 'true',
+  )
   if (!characters.length) return
   const count = characters.length
+  const travel = Math.max(0, 1 - KARAOKE_CHARACTER_WAVE_WIDTH)
   characters.forEach((node, index) => {
-    if (node.dataset.whitespace === 'true') return
-    const center = (index + 0.5) / count
-    const start = Math.max(0, center - KARAOKE_CHARACTER_WAVE_WIDTH / 2)
-    const end = Math.min(1, center + KARAOKE_CHARACTER_WAVE_WIDTH / 2)
+    const start = count <= 1 ? 0 : (index / (count - 1)) * travel
     const local = Math.max(
       0,
-      Math.min(1, (progress - start) / Math.max(0.001, end - start)),
+      Math.min(
+        1,
+        (progress - start) / Math.max(0.001, KARAOKE_CHARACTER_WAVE_WIDTH),
+      ),
     )
     const offset = -KARAOKE_CHARACTER_LIFT_PX * smoothStep(local)
-    const nextTransform = `translateY(${offset.toFixed(3)}px)`
-    if (node.style.transform !== nextTransform)
-      node.style.transform = nextTransform
+    const nextTop = `${offset.toFixed(3)}px`
+    if (node.style.top !== nextTop) node.style.top = nextTop
   })
 }
 

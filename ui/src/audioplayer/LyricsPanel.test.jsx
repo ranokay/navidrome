@@ -339,15 +339,30 @@ describe('<LyricsPanel />', () => {
 
     expect(mainCharacters).toHaveLength(4)
     expect(pronunciationCharacters).toHaveLength(4)
-    expect(mainCharacters[0].style.transform).toBe(
-      `translateY(-${KARAOKE_CHARACTER_LIFT_PX.toFixed(3)}px)`,
+    expect(mainCharacters[0].style.top).toBe(
+      `-${KARAOKE_CHARACTER_LIFT_PX.toFixed(3)}px`,
     )
-    expect(mainCharacters[3].style.transform).not.toBe(
-      mainCharacters[0].style.transform,
+    expect(
+      Number.parseFloat(mainCharacters[3].style.top || '0'),
+    ).toBeGreaterThan(Number.parseFloat(mainCharacters[0].style.top))
+    expect(pronunciationCharacters[0].style.top).toBe(
+      mainCharacters[0].style.top,
     )
-    expect(pronunciationCharacters[0].style.transform).toBe(
-      mainCharacters[0].style.transform,
-    )
+  })
+
+  it('applies the character wave to ordinary timed lyrics without pronunciation', () => {
+    renderPanel({
+      mainLyric: tokenizedMainLyric,
+      audioInstance: { currentTime: 0.25, paused: true },
+    })
+
+    const tokens = screen.getAllByTestId('lyrics-token')
+    expect(
+      tokens[0].querySelectorAll('[data-lyrics-character="true"]'),
+    ).toHaveLength(4)
+    expect(
+      tokens[1].querySelectorAll('[data-lyrics-character="true"]'),
+    ).toHaveLength(4)
   })
 
   it('uses the same active and release lifecycle for all line-level layers', () => {
@@ -435,7 +450,9 @@ describe('<LyricsPanel />', () => {
     const groups = screen.getAllByTestId('lyrics-line-group')
     expect(groups).toHaveLength(2)
     groups.forEach((group) => {
-      expect(group).toHaveAttribute('data-active', 'false')
+      expect(group).toHaveAttribute('data-active', 'true')
+      expect(group).toHaveAttribute('data-lifecycle', 'active')
+      expect(group).toHaveAttribute('data-highlight-active', 'true')
       expect(group).not.toHaveAttribute('aria-current')
       expect(group).toHaveAttribute('data-scroll-target', 'false')
     })
@@ -638,6 +655,21 @@ describe('<LyricsPanel />', () => {
         .getByTestId('lyrics-scroll-body')
         .querySelector('[data-scroll-end-padding]')
       expect(lines).toHaveAttribute('data-scroll-end-padding', '290')
+      unmount()
+
+      renderPanel({
+        mainLyric: {
+          synced: false,
+          line: [{ value: 'Plain first line' }, { value: 'Plain last line' }],
+        },
+      })
+      lines = screen
+        .getByTestId('lyrics-scroll-body')
+        .querySelector('[data-scroll-end-padding]')
+      expect(lines).toHaveAttribute(
+        'data-scroll-end-padding',
+        String(expectedDesktop),
+      )
     } finally {
       if (originalClientHeight) {
         Object.defineProperty(
