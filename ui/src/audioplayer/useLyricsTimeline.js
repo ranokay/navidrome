@@ -7,6 +7,8 @@ import {
   useState,
 } from 'react'
 import {
+  KARAOKE_CHARACTER_LIFT_PX,
+  KARAOKE_CHARACTER_WAVE_WIDTH,
   KARAOKE_CLOCK_DRIFT_RESET_MS,
   KARAOKE_HIGHLIGHT_LEAD_MS,
   KARAOKE_LINE_RELEASE_MS,
@@ -38,6 +40,28 @@ const setProgress = (record, value) => {
     return
   record.progress = next
   record.node.style.setProperty('--lyrics-progress', String(next))
+}
+
+const smoothStep = (value) => value * value * (3 - 2 * value)
+
+const setCharacterLift = (record, progress) => {
+  const characters = record.characters || []
+  if (!characters.length) return
+  const count = characters.length
+  characters.forEach((node, index) => {
+    if (node.dataset.whitespace === 'true') return
+    const center = (index + 0.5) / count
+    const start = Math.max(0, center - KARAOKE_CHARACTER_WAVE_WIDTH / 2)
+    const end = Math.min(1, center + KARAOKE_CHARACTER_WAVE_WIDTH / 2)
+    const local = Math.max(
+      0,
+      Math.min(1, (progress - start) / Math.max(0.001, end - start)),
+    )
+    const offset = -KARAOKE_CHARACTER_LIFT_PX * smoothStep(local)
+    const nextTransform = `translateY(${offset.toFixed(3)}px)`
+    if (node.style.transform !== nextTransform)
+      node.style.transform = nextTransform
+  })
 }
 
 const setTokenOpacity = (record, value) => {
@@ -76,6 +100,7 @@ const applyTokenState = (record, state, progress = 0) => {
       setGradientTokenColor(record)
     }
     setProgress(record, progress)
+    setCharacterLift(record, progress)
     return
   }
 
@@ -83,11 +108,13 @@ const applyTokenState = (record, state, progress = 0) => {
   if (state === 'completed') {
     setSolidTokenColor(record, presentation.doneColor || 'currentColor')
     setProgress(record, 1)
+    setCharacterLift(record, 1)
     return
   }
 
   setSolidTokenColor(record, presentation.futureColor || 'currentColor')
   setProgress(record, 0)
+  setCharacterLift(record, state === 'inactive-past' ? 1 : 0)
 }
 
 const setTokenReleasePresentation = (record, progress) => {
@@ -170,6 +197,7 @@ const useLyricsTimeline = ({
     node.dataset.active = phase === 'active' ? 'true' : 'false'
     node.dataset.lifecycle = phase
     node.dataset.highlightActive = phase === 'active' ? 'true' : 'false'
+    node.dataset.raised = phase === 'idle' ? 'false' : 'true'
   }, [])
 
   const resetLineTokens = useCallback((lineIndex, state = 'future') => {
@@ -237,7 +265,7 @@ const useLyricsTimeline = ({
                 (current - window.end) / KARAOKE_LINE_RELEASE_MS,
               )
             } else {
-              setLineState(window.lineIndex, 'idle')
+              setLineState(window.lineIndex, 'past')
               resetLineTokens(window.lineIndex, 'inactive-past')
             }
           }
@@ -255,7 +283,7 @@ const useLyricsTimeline = ({
             setLineState(lineIndex, 'release')
             updateLineReleaseTokens(lineIndex, 0)
           } else {
-            setLineState(lineIndex, 'idle')
+            setLineState(lineIndex, 'past')
             resetLineTokens(lineIndex, 'inactive-past')
           }
         })
@@ -275,11 +303,9 @@ const useLyricsTimeline = ({
           current < window.end
         ) {
           releaseIndexesRef.current.delete(lineIndex)
-          setLineState(lineIndex, 'idle')
-          resetLineTokens(
-            lineIndex,
-            current >= (window?.end ?? Infinity) ? 'inactive-past' : 'future',
-          )
+          const isPast = current >= (window?.end ?? Infinity)
+          setLineState(lineIndex, isPast ? 'past' : 'idle')
+          resetLineTokens(lineIndex, isPast ? 'inactive-past' : 'future')
           return
         }
         updateLineReleaseTokens(
@@ -321,6 +347,8 @@ const useLyricsTimeline = ({
         time < window.end + KARAOKE_LINE_RELEASE_MS
       ) {
         setLineState(lineIndex, 'release')
+      } else if (window?.valid && time >= window.end) {
+        setLineState(lineIndex, 'past')
       } else {
         setLineState(lineIndex, 'idle')
       }
@@ -349,6 +377,9 @@ const useLyricsTimeline = ({
         lineIndex: descriptor.lineIndex,
         window: descriptor.window,
         presentation: descriptor.presentation,
+        characters: reducedMotion
+          ? []
+          : Array.from(node.querySelectorAll('[data-lyrics-character="true"]')),
         progress: null,
         opacity: null,
         state: null,
@@ -400,6 +431,7 @@ const useLyricsTimeline = ({
       node.dataset.active = 'false'
       node.dataset.lifecycle = 'idle'
       node.dataset.highlightActive = 'false'
+      node.dataset.raised = 'false'
     })
     tokenRecordsRef.current.forEach((record) => resetToken(record))
     cursorRef.current = new LyricTimelineCursor(timeline)

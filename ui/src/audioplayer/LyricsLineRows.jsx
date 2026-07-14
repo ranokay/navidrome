@@ -17,6 +17,33 @@ import { resolveKaraokeTokenWindows } from './lyricsTimeline'
 
 const EMPHASIS_TONE = 0.7
 
+const graphemeSegmenter =
+  typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    : null
+
+const splitGraphemes = (value) => {
+  const text = String(value || '')
+  return graphemeSegmenter
+    ? Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment)
+    : Array.from(text)
+}
+
+const renderWaveText = (text, enabled, className) => {
+  if (!enabled) return text
+  return splitGraphemes(text).map((character, index) => (
+    <span
+      key={`${index}-${character}`}
+      aria-hidden="true"
+      className={className}
+      data-lyrics-character="true"
+      data-whitespace={/^\s+$/.test(character) ? 'true' : 'false'}
+    >
+      {character}
+    </span>
+  ))
+}
+
 const tokenColor = (rgb, alpha) => {
   const [r, g, b] = rgb || [255, 255, 255]
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
@@ -102,6 +129,7 @@ export const KaraokeLineRow = memo(
     className,
     style,
     tokenClassName,
+    waveCharacterClassName,
     registerToken,
     rowKey = 'main',
     testId,
@@ -152,8 +180,13 @@ export const KaraokeLineRow = memo(
                 presentation: tokenData.presentation,
               })}
               style={tokenData.style}
+              aria-label={segment.text}
             >
-              {segment.text}
+              {renderWaveText(
+                segment.text,
+                Boolean(window?.start != null && window?.end != null),
+                waveCharacterClassName,
+              )}
             </span>
           )
         })}
@@ -167,6 +200,7 @@ export const KaraokeLineRow = memo(
     prevProps.className === nextProps.className &&
     prevProps.style === nextProps.style &&
     prevProps.tokenClassName === nextProps.tokenClassName &&
+    prevProps.waveCharacterClassName === nextProps.waveCharacterClassName &&
     prevProps.registerToken === nextProps.registerToken &&
     prevProps.rowKey === nextProps.rowKey &&
     prevProps.testId === nextProps.testId,
@@ -297,6 +331,7 @@ export const KaraokeStackedLineRow = memo(
     className,
     style,
     tokenClassName,
+    waveCharacterClassName,
     classes,
     registerToken,
     rowKey = 'main',
@@ -392,8 +427,13 @@ export const KaraokeStackedLineRow = memo(
                 presentation: mainTokenData.presentation,
               })}
               style={mainTokenData.style}
+              aria-label={segment.text}
             >
-              {segment.text}
+              {renderWaveText(
+                segment.text,
+                Boolean(mainWindow?.start != null && mainWindow?.end != null),
+                waveCharacterClassName,
+              )}
             </span>
           ) : (
             <span
@@ -430,6 +470,9 @@ export const KaraokeStackedLineRow = memo(
                 data-testid="lyrics-pronunciation-token"
                 data-lyrics-state="future"
                 data-timed={pronunciationWindow ? 'true' : 'false'}
+                aria-label={
+                  pronunciationWindow ? segment.pronunciation : undefined
+                }
                 ref={
                   pronunciationWindow
                     ? tokenRef({
@@ -450,7 +493,11 @@ export const KaraokeStackedLineRow = memo(
                   }
                 }
               >
-                {segment.pronunciation}
+                {renderWaveText(
+                  segment.pronunciation,
+                  Boolean(pronunciationWindow),
+                  waveCharacterClassName,
+                )}
               </span>
             </span>
           )
@@ -467,6 +514,7 @@ export const KaraokeStackedLineRow = memo(
     prevProps.className === nextProps.className &&
     prevProps.style === nextProps.style &&
     prevProps.tokenClassName === nextProps.tokenClassName &&
+    prevProps.waveCharacterClassName === nextProps.waveCharacterClassName &&
     prevProps.classes === nextProps.classes &&
     prevProps.registerToken === nextProps.registerToken &&
     prevProps.rowKey === nextProps.rowKey &&

@@ -4,10 +4,10 @@ import { ThemeProvider, createTheme } from '@material-ui/core/styles'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import LyricsPanel from './LyricsPanel'
 import {
+  KARAOKE_CHARACTER_LIFT_PX,
   KARAOKE_DESKTOP_ACTIVE_LINE_ANCHOR_RATIO,
   KARAOKE_LINE_ENTER_MS,
   KARAOKE_LINE_LIFT_PX,
-  KARAOKE_LINE_MOTION_RELEASE_MS,
   KARAOKE_MANUAL_SCROLL_PAUSE_MS,
 } from './lyricsKaraokeConstants'
 import { buildSegmentsFromLine } from './lyricsSegments'
@@ -287,7 +287,7 @@ describe('<LyricsPanel />', () => {
     ).not.toBe('')
   })
 
-  it('uses a subtle fluid lift and a slower settled return', () => {
+  it('raises a line once and keeps it elevated after release', () => {
     const { rerender } = renderPanel({
       mainLyric,
       audioInstance: { currentTime: 0.5, paused: true },
@@ -296,6 +296,7 @@ describe('<LyricsPanel />', () => {
     const group = screen.getByTestId('lyrics-line-group')
     const activeStyle = window.getComputedStyle(group)
     expect(group).toHaveAttribute('data-highlight-active', 'true')
+    expect(group).toHaveAttribute('data-raised', 'true')
     expect(activeStyle.transform).toBe(`translateY(-${KARAOKE_LINE_LIFT_PX}px)`)
     expect(activeStyle.transitionDuration).toBe(`${KARAOKE_LINE_ENTER_MS}ms`)
 
@@ -311,9 +312,41 @@ describe('<LyricsPanel />', () => {
 
     const releasedStyle = window.getComputedStyle(group)
     expect(group).toHaveAttribute('data-highlight-active', 'false')
-    expect(releasedStyle.transform).toBe('translateY(0)')
-    expect(releasedStyle.transitionDuration).toBe(
-      `${KARAOKE_LINE_MOTION_RELEASE_MS}ms`,
+    expect(group).toHaveAttribute('data-raised', 'true')
+    expect(releasedStyle.transform).toBe(
+      `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
+    )
+  })
+
+  it('lifts timed main and pronunciation graphemes with token progress', () => {
+    renderPanel({
+      mainLyric: tokenizedMainLyric,
+      pronunciationLyric: tokenizedPronunciationLyric,
+      showPronunciation: true,
+      audioInstance: { currentTime: 0.25, paused: true },
+    })
+
+    const mainToken = screen.getAllByTestId('lyrics-token')[0]
+    const pronunciationToken = screen.getAllByTestId(
+      'lyrics-pronunciation-token',
+    )[0]
+    const mainCharacters = mainToken.querySelectorAll(
+      '[data-lyrics-character="true"]',
+    )
+    const pronunciationCharacters = pronunciationToken.querySelectorAll(
+      '[data-lyrics-character="true"]',
+    )
+
+    expect(mainCharacters).toHaveLength(4)
+    expect(pronunciationCharacters).toHaveLength(4)
+    expect(mainCharacters[0].style.transform).toBe(
+      `translateY(-${KARAOKE_CHARACTER_LIFT_PX.toFixed(3)}px)`,
+    )
+    expect(mainCharacters[3].style.transform).not.toBe(
+      mainCharacters[0].style.transform,
+    )
+    expect(pronunciationCharacters[0].style.transform).toBe(
+      mainCharacters[0].style.transform,
     )
   })
 

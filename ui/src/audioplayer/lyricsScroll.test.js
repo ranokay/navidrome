@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  KARAOKE_CHARACTER_LIFT_PX,
+  KARAOKE_CHARACTER_WAVE_WIDTH,
   KARAOKE_HIGHLIGHT_LEAD_MS,
   KARAOKE_LINE_ENTER_MS,
   KARAOKE_LINE_LIFT_PX,
@@ -44,6 +46,8 @@ describe('lyrics scroll helpers', () => {
     expect(KARAOKE_SCROLL_PRE_ROLL_MS).toBe(320)
     expect(KARAOKE_SCROLL_ANIMATION_MS).toBe(300)
     expect(KARAOKE_LINE_ENTER_MS).toBe(180)
+    expect(KARAOKE_CHARACTER_LIFT_PX).toBe(1.4)
+    expect(KARAOKE_CHARACTER_WAVE_WIDTH).toBe(0.28)
     expect(KARAOKE_LINE_MOTION_RELEASE_MS).toBe(280)
     expect(KARAOKE_LINE_LIFT_PX).toBe(1.5)
   })

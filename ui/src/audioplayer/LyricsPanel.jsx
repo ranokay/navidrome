@@ -25,7 +25,6 @@ import {
   KARAOKE_LINE_ENTER_MS,
   KARAOKE_LINE_LIFT_PX,
   KARAOKE_LINE_MOTION_EASING,
-  KARAOKE_LINE_MOTION_RELEASE_MS,
   KARAOKE_MANUAL_SCROLL_PAUSE_MS,
   KARAOKE_SCROLLBAR_VISIBLE_MS,
 } from './lyricsKaraokeConstants'
@@ -114,10 +113,10 @@ const useStyles = makeStyles((theme) => ({
       'var(--lyrics-translation-idle-color, currentColor)',
     '--lyrics-layer-opacity': 0.49,
     transform: 'translateY(0)',
-    transition: `transform ${KARAOKE_LINE_MOTION_RELEASE_MS}ms ${KARAOKE_LINE_MOTION_EASING}`,
-    '&[data-highlight-active="true"]': {
+    transition: 'none',
+    '&[data-raised="true"]': {
       transform: `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
-      transitionDuration: `${KARAOKE_LINE_ENTER_MS}ms`,
+      transition: `transform ${KARAOKE_LINE_ENTER_MS}ms ${KARAOKE_LINE_MOTION_EASING}`,
     },
     '&[data-active="true"]': {
       '--lyrics-main-current-color':
@@ -131,6 +130,15 @@ const useStyles = makeStyles((theme) => ({
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
       transform: 'none',
+    },
+  },
+  waveCharacter: {
+    display: 'inline-block',
+    willChange: 'transform',
+    transform: 'translateY(0)',
+    '@media (prefers-reduced-motion: reduce)': {
+      transform: 'none !important',
+      willChange: 'auto',
     },
   },
   line: {
@@ -708,6 +716,7 @@ const LyricsPanel = ({
                 className={classes.lineGroup}
                 data-active={isActiveLine ? 'true' : 'false'}
                 data-lifecycle={isActiveLine ? 'active' : 'idle'}
+                data-raised={isActiveLine ? 'true' : 'false'}
                 aria-current={idx === activeIndex ? 'true' : undefined}
                 data-scroll-target={
                   idx === scrollTargetIndex ? 'true' : 'false'
@@ -775,6 +784,7 @@ const LyricsPanel = ({
                           className={laneClassName}
                           style={layerStyles.main}
                           tokenClassName={classes.token}
+                          waveCharacterClassName={classes.waveCharacter}
                           registerToken={registerToken}
                           rowKey={rowKey}
                           testId="lyrics-voice-lane"
