@@ -24,7 +24,20 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - name: Apply persistent lift and character wave
-        run: python3 .github/scripts/apply-persistent-line-lift-and-character-wave.py
+        run: |
+          set +e
+          python3 .github/scripts/apply-persistent-line-lift-and-character-wave.py > /tmp/character-wave-patch.log 2>&1
+          status=$?
+          cat /tmp/character-wave-patch.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/character-wave-patch.log .github/character-wave-patch-error.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/character-wave-patch-error.txt
+            git commit -m "chore: capture character wave patch failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Install dependencies
         working-directory: ui
         run: npm ci
@@ -44,6 +57,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f .github/workflows/apply-persistent-line-lift-and-character-wave-once.yml
           rm -f .github/scripts/apply-persistent-line-lift-and-character-wave.py
+          rm -f .github/character-wave-patch-error.txt
           git add -A
           git commit -m "fix(ui): add persistent lyric lift and character wave"
           git push origin HEAD:lyrics-sidebar-performance
