@@ -1,0 +1,44 @@
+name: Tune line duration estimate
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/tune-line-duration-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: lyrics-sidebar-performance
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: python3 .github/scripts/tune-line-duration-estimate.py
+      - working-directory: ui
+        run: npm ci
+      - working-directory: ui
+        run: npx prettier --write src/audioplayer/lyricsTimeline.js
+      - working-directory: ui
+        run: |
+          npm run check-formatting
+          npm run lint
+          npm test
+          npm run build
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/tune-line-duration-once.yml
+          rm -f .github/scripts/tune-line-duration-estimate.py
+          git add -A
+          git commit -m "fix(ui): tune inferred line release duration"
+          git push origin HEAD:lyrics-sidebar-performance
