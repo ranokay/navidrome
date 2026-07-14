@@ -26,6 +26,7 @@ jobs:
       - name: Apply unified animation fixes
         run: |
           set +e
+          python3 .github/scripts/fix-unified-patch-script.py
           python3 .github/scripts/apply-unified-lyrics-animation.py > /tmp/unified-lyrics-fix.log 2>&1
           status=$?
           cat /tmp/unified-lyrics-fix.log
@@ -57,6 +58,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/apply-unified-lyrics-animation-once.yml
           git rm .github/scripts/apply-unified-lyrics-animation.py
+          git rm .github/scripts/fix-unified-patch-script.py
           git rm -f .github/unified-lyrics-fix-error.txt
           git add ui/src/audioplayer
           git commit -m "fix(ui): unify lyrics layer animation lifecycle"
