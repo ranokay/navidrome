@@ -23,6 +23,9 @@ import {
   KARAOKE_EASING,
   KARAOKE_INLINE_ACTIVE_LINE_ANCHOR_RATIO,
   KARAOKE_LINE_ENTER_MS,
+  KARAOKE_LINE_LIFT_PX,
+  KARAOKE_LINE_MOTION_EASING,
+  KARAOKE_LINE_MOTION_RELEASE_MS,
   KARAOKE_MANUAL_SCROLL_PAUSE_MS,
   KARAOKE_SCROLLBAR_VISIBLE_MS,
 } from './lyricsKaraokeConstants'
@@ -111,9 +114,9 @@ const useStyles = makeStyles((theme) => ({
       'var(--lyrics-translation-idle-color, currentColor)',
     '--lyrics-layer-opacity': 0.49,
     transform: 'translateY(0)',
-    transition: `transform ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
+    transition: `transform ${KARAOKE_LINE_MOTION_RELEASE_MS}ms ${KARAOKE_LINE_MOTION_EASING}`,
     '&[data-highlight-active="true"]': {
-      transform: 'translateY(-2px)',
+      transform: `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
       transitionDuration: `${KARAOKE_LINE_ENTER_MS}ms`,
     },
     '&[data-active="true"]': {

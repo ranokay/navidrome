@@ -4,9 +4,10 @@ import { ThemeProvider, createTheme } from '@material-ui/core/styles'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import LyricsPanel from './LyricsPanel'
 import {
-  KARAOKE_ANIMATION_MS,
   KARAOKE_DESKTOP_ACTIVE_LINE_ANCHOR_RATIO,
   KARAOKE_LINE_ENTER_MS,
+  KARAOKE_LINE_LIFT_PX,
+  KARAOKE_LINE_MOTION_RELEASE_MS,
   KARAOKE_MANUAL_SCROLL_PAUSE_MS,
 } from './lyricsKaraokeConstants'
 import { buildSegmentsFromLine } from './lyricsSegments'
@@ -286,17 +287,17 @@ describe('<LyricsPanel />', () => {
     ).not.toBe('')
   })
 
-  it('uses a quick line enter and the shared release duration', () => {
+  it('uses a subtle fluid lift and a slower settled return', () => {
     const { rerender } = renderPanel({
       mainLyric,
       audioInstance: { currentTime: 0.5, paused: true },
     })
 
     const group = screen.getByTestId('lyrics-line-group')
+    const activeStyle = window.getComputedStyle(group)
     expect(group).toHaveAttribute('data-highlight-active', 'true')
-    expect(window.getComputedStyle(group).transitionDuration).toBe(
-      `${KARAOKE_LINE_ENTER_MS}ms`,
-    )
+    expect(activeStyle.transform).toBe(`translateY(-${KARAOKE_LINE_LIFT_PX}px)`)
+    expect(activeStyle.transitionDuration).toBe(`${KARAOKE_LINE_ENTER_MS}ms`)
 
     rerender(
       <ThemeProvider theme={theme}>
@@ -308,9 +309,11 @@ describe('<LyricsPanel />', () => {
       </ThemeProvider>,
     )
 
+    const releasedStyle = window.getComputedStyle(group)
     expect(group).toHaveAttribute('data-highlight-active', 'false')
-    expect(window.getComputedStyle(group).transitionDuration).toBe(
-      `${KARAOKE_ANIMATION_MS}ms`,
+    expect(releasedStyle.transform).toBe('translateY(0)')
+    expect(releasedStyle.transitionDuration).toBe(
+      `${KARAOKE_LINE_MOTION_RELEASE_MS}ms`,
     )
   })
 

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   KARAOKE_HIGHLIGHT_LEAD_MS,
   KARAOKE_LINE_ENTER_MS,
+  KARAOKE_LINE_LIFT_PX,
+  KARAOKE_LINE_MOTION_RELEASE_MS,
   KARAOKE_SCROLL_ANIMATION_MS,
   KARAOKE_SCROLL_PRE_ROLL_MS,
 } from './lyricsKaraokeConstants'
@@ -41,7 +43,9 @@ describe('lyrics scroll helpers', () => {
     expect(KARAOKE_HIGHLIGHT_LEAD_MS).toBe(120)
     expect(KARAOKE_SCROLL_PRE_ROLL_MS).toBe(320)
     expect(KARAOKE_SCROLL_ANIMATION_MS).toBe(300)
-    expect(KARAOKE_LINE_ENTER_MS).toBe(100)
+    expect(KARAOKE_LINE_ENTER_MS).toBe(180)
+    expect(KARAOKE_LINE_MOTION_RELEASE_MS).toBe(280)
+    expect(KARAOKE_LINE_LIFT_PX).toBe(1.5)
   })
 
   it('calculates end padding from the active-line anchor', () => {
