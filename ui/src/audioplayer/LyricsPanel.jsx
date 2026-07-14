@@ -34,7 +34,7 @@ import {
 } from './lyricsScroll'
 import useLyricsTimeline from './useLyricsTimeline'
 
-const KARAOKE_LAYER_COLOR_TRANSITION = `color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`
+const KARAOKE_LAYER_OPACITY_TRANSITION = `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`
 
 const useStyles = makeStyles((theme) => ({
   root: {
@@ -108,6 +108,7 @@ const useStyles = makeStyles((theme) => ({
       'var(--lyrics-pronunciation-idle-color, currentColor)',
     '--lyrics-translation-current-color':
       'var(--lyrics-translation-idle-color, currentColor)',
+    '--lyrics-layer-opacity': 0.49,
     transform: 'translateY(0)',
     transition: `transform ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,
     '&[data-highlight-active="true"]': {
@@ -120,6 +121,7 @@ const useStyles = makeStyles((theme) => ({
         'var(--lyrics-pronunciation-active-color, var(--lyrics-pronunciation-idle-color, currentColor))',
       '--lyrics-translation-current-color':
         'var(--lyrics-translation-active-color, var(--lyrics-translation-idle-color, currentColor))',
+      '--lyrics-layer-opacity': 1,
     },
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
@@ -137,7 +139,12 @@ const useStyles = makeStyles((theme) => ({
     letterSpacing: 0,
     color: 'var(--lyrics-main-current-color, currentColor)',
     WebkitTextFillColor: 'var(--lyrics-main-current-color, currentColor)',
-    transition: KARAOKE_LAYER_COLOR_TRANSITION,
+    '&[data-tokenized="false"]': {
+      opacity: 'var(--lyrics-layer-opacity)',
+      color: 'var(--lyrics-main-active-color, currentColor)',
+      WebkitTextFillColor: 'var(--lyrics-main-active-color, currentColor)',
+      transition: KARAOKE_LAYER_OPACITY_TRANSITION,
+    },
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
     },
@@ -154,10 +161,10 @@ const useStyles = makeStyles((theme) => ({
     overflowWrap: 'anywhere',
     whiteSpace: 'pre-wrap',
     letterSpacing: 0,
-    color: 'var(--lyrics-translation-current-color, currentColor)',
-    WebkitTextFillColor:
-      'var(--lyrics-translation-current-color, currentColor)',
-    transition: KARAOKE_LAYER_COLOR_TRANSITION,
+    opacity: 'var(--lyrics-layer-opacity)',
+    color: 'var(--lyrics-translation-active-color, currentColor)',
+    WebkitTextFillColor: 'var(--lyrics-translation-active-color, currentColor)',
+    transition: KARAOKE_LAYER_OPACITY_TRANSITION,
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
     },
@@ -198,7 +205,11 @@ const useStyles = makeStyles((theme) => ({
     color: 'var(--lyrics-pronunciation-current-color, currentColor)',
     WebkitTextFillColor:
       'var(--lyrics-pronunciation-current-color, currentColor)',
-    transition: KARAOKE_LAYER_COLOR_TRANSITION,
+    '&[data-timed="false"]': {
+      color: 'var(--lyrics-pronunciation-active-color, currentColor)',
+      WebkitTextFillColor:
+        'var(--lyrics-pronunciation-active-color, currentColor)',
+    },
     '&[data-timed="true"]': {
       transition: 'none',
     },

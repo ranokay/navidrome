@@ -114,6 +114,9 @@ export const KaraokeLineRow = memo(
       () => (style?.color ? parseColorRGB(style.color) : [255, 255, 255]),
       [style?.color],
     )
+    const hasTimedTokens = windows.some(
+      (window) => window?.start != null && window?.end != null,
+    )
     const lineStyle = useMemo(() => buildLineStyle(line, style), [line, style])
 
     return (
@@ -121,6 +124,10 @@ export const KaraokeLineRow = memo(
         className={className}
         component="div"
         data-testid={testId}
+        data-tokenized={hasTimedTokens ? 'true' : 'false'}
+        data-layer-animation={
+          hasTimedTokens ? 'token-gradient' : 'shared-opacity'
+        }
         style={lineStyle}
       >
         {segments.map((segment, idx) => {
@@ -319,6 +326,9 @@ export const KaraokeStackedLineRow = memo(
           : [255, 255, 255],
       [pronunciationStyle?.color],
     )
+    const hasTimedTokens = mainWindows.some(
+      (window) => window?.start != null && window?.end != null,
+    )
     const lineStyle = useMemo(() => buildLineStyle(line, style), [line, style])
 
     useLayoutEffect(() => {
@@ -352,6 +362,10 @@ export const KaraokeStackedLineRow = memo(
         component="div"
         data-wrapped={isWrapped ? 'true' : 'false'}
         data-testid={testId}
+        data-tokenized={hasTimedTokens ? 'true' : 'false'}
+        data-layer-animation={
+          hasTimedTokens ? 'token-gradient' : 'shared-opacity'
+        }
         ref={rowRef}
         style={lineStyle}
       >

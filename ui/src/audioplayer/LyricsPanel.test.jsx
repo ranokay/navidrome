@@ -179,6 +179,38 @@ describe('<LyricsPanel />', () => {
     expect(pronunciation.style.color).toBe('')
   })
 
+  it('uses one shared opacity animation for every static line layer', () => {
+    renderPanel({
+      mainLyric,
+      pronunciationLyric: {
+        synced: true,
+        line: [{ start: 0, end: 1000, value: 'main pronunciation' }],
+      },
+      translationLyric: {
+        synced: true,
+        line: [{ start: 0, end: 1000, value: 'translated line' }],
+      },
+      showPronunciation: true,
+      showTranslation: true,
+      audioInstance: { currentTime: 0.5, paused: true },
+    })
+
+    const mainRow = screen.getByText('Main line').closest('[data-tokenized]')
+    const translationRow = screen
+      .getByText('translated line')
+      .closest('[data-tokenized]')
+    const pronunciation = screen.getByText('main pronunciation')
+
+    expect(mainRow).toHaveAttribute('data-layer-animation', 'shared-opacity')
+    expect(translationRow).toHaveAttribute(
+      'data-layer-animation',
+      'shared-opacity',
+    )
+    expect(pronunciation).toHaveAttribute('data-timed', 'false')
+    expect(mainRow).toHaveAttribute('data-tokenized', 'false')
+    expect(translationRow).toHaveAttribute('data-tokenized', 'false')
+  })
+
   it('keeps timed translations on the main line lifecycle', () => {
     const translationLyric = {
       synced: true,
@@ -222,6 +254,10 @@ describe('<LyricsPanel />', () => {
     const translation = screen.getByText('Translated phrase')
     expect(group).toHaveAttribute('data-active', 'true')
     expect(translation).not.toHaveAttribute('data-lyrics-state')
+    expect(translation).toHaveAttribute(
+      'data-layer-animation',
+      'shared-opacity',
+    )
     expect(translation.style.backgroundImage).toBe('')
     expect(
       group.style.getPropertyValue('--lyrics-translation-active-color'),
