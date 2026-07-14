@@ -1,0 +1,49 @@
+name: Fix lyrics wave and static polish
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/fix-lyrics-wave-and-static-polish-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: lyrics-sidebar-performance
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Apply lyrics polish fixes
+        run: python3 .github/scripts/fix-lyrics-wave-and-static-polish.py
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Format changed files
+        working-directory: ui
+        run: npx prettier --write src/audioplayer/lyricsKaraokeConstants.js src/audioplayer/useLyricsTimeline.js src/audioplayer/LyricsLineRows.jsx src/audioplayer/LyricsPanel.jsx src/audioplayer/LyricsPanel.test.jsx
+      - name: Validate UI
+        working-directory: ui
+        run: |
+          npm run check-formatting
+          npm run lint
+          npm test
+          npm run build
+      - name: Commit fixes and remove temporary files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/fix-lyrics-wave-and-static-polish-once.yml
+          rm -f .github/scripts/fix-lyrics-wave-and-static-polish.py
+          git add -A
+          git commit -m "fix(ui): polish lyric wave and static presentation"
+          git push origin HEAD:lyrics-sidebar-performance
