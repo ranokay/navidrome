@@ -50,21 +50,22 @@ export const animateScrollTop = ({
   const startedAt = performance.now()
   const animation = { frameId: null }
   const step = () => {
+    if (scrollAnimationRef.current !== animation) return
+
     const progress = clamp(
       (performance.now() - startedAt) / KARAOKE_SCROLL_ANIMATION_MS,
       0,
       1,
     )
-    body.scrollTop = startTop + distance * easeInOut(progress)
+    body.scrollTop =
+      progress >= 1 ? nextTargetTop : startTop + distance * easeInOut(progress)
 
     if (progress < 1) {
       animation.frameId = window.requestAnimationFrame(step)
       return
     }
 
-    if (scrollAnimationRef.current === animation) {
-      scrollAnimationRef.current = null
-    }
+    scrollAnimationRef.current = null
   }
 
   animation.frameId = window.requestAnimationFrame(step)

@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  KARAOKE_HIGHLIGHT_LEAD_MS,
+  KARAOKE_LINE_ENTER_MS,
+  KARAOKE_SCROLL_ANIMATION_MS,
+  KARAOKE_SCROLL_PRE_ROLL_MS,
+} from './lyricsKaraokeConstants'
+import {
   animateScrollTop,
   cancelScrollAnimation,
   getAnchoredScrollTop,
@@ -29,6 +35,13 @@ describe('lyrics scroll helpers', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('uses the phase 4 motion timing profile', () => {
+    expect(KARAOKE_HIGHLIGHT_LEAD_MS).toBe(120)
+    expect(KARAOKE_SCROLL_PRE_ROLL_MS).toBe(320)
+    expect(KARAOKE_SCROLL_ANIMATION_MS).toBe(300)
+    expect(KARAOKE_LINE_ENTER_MS).toBe(100)
   })
 
   it('calculates end padding from the active-line anchor', () => {
@@ -140,7 +153,7 @@ describe('lyrics scroll helpers', () => {
     expect(scrollAnimationRef.current).toBeNull()
   })
 
-  it('keeps a newer animation when an older frame completes late', () => {
+  it('ignores stale frames after a newer scroll animation starts', () => {
     const body = createScrollableBody()
     const scrollAnimationRef = { current: null }
 
@@ -162,12 +175,21 @@ describe('lyrics scroll helpers', () => {
 
     expect(secondAnimation).not.toBe(firstAnimation)
 
-    now = 1000
+    now = KARAOKE_SCROLL_ANIMATION_MS / 2
     animationFrames[0]()
 
+    expect(body.scrollTop).toBe(0)
     expect(scrollAnimationRef.current).toBe(secondAnimation)
+    expect(animationFrames).toHaveLength(2)
 
     animationFrames[1]()
+
+    expect(body.scrollTop).toBe(250)
+    expect(scrollAnimationRef.current).toBe(secondAnimation)
+    expect(animationFrames).toHaveLength(3)
+
+    now = KARAOKE_SCROLL_ANIMATION_MS
+    animationFrames[2]()
 
     expect(body.scrollTop).toBe(500)
     expect(scrollAnimationRef.current).toBeNull()
