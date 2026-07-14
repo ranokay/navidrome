@@ -202,6 +202,54 @@ describe('useLyricsTimeline', () => {
       )
   })
 
+  it('keeps gradient paint and opacity continuous when release becomes past', () => {
+    const audio = createAudio({ currentTime: 0.25, paused: true })
+    const { result } = renderHook(() =>
+      useLyricsTimeline({
+        lines,
+        audioInstance: audio,
+        visible: true,
+        reducedMotion: false,
+      }),
+    )
+    const tokenNode = document.createElement('span')
+    Array.from('first').forEach((character) => {
+      const node = document.createElement('span')
+      node.dataset.lyricsCharacter = 'true'
+      node.textContent = character
+      tokenNode.appendChild(node)
+    })
+
+    act(() => {
+      result.current.registerToken(
+        '0:no-release-blink',
+        {
+          lineIndex: 0,
+          window: { start: 0, end: 500 },
+          presentation,
+        },
+        tokenNode,
+      )
+    })
+
+    act(() => result.current.syncNow(1219, true))
+    const gradient = tokenNode.style.backgroundImage
+    const releaseOpacity = Number(tokenNode.style.opacity)
+    expect(tokenNode.dataset.lyricsState).toBe('release')
+    expect(tokenNode.style.color).toBe('transparent')
+
+    act(() => result.current.syncNow(1220, true))
+
+    const pastOpacity = Number(tokenNode.style.opacity)
+    expect(tokenNode.dataset.lyricsState).toBe('inactive-past')
+    expect(tokenNode.style.backgroundImage).toBe(gradient)
+    expect(tokenNode.style.color).toBe('transparent')
+    expect(tokenNode.style.webkitTextFillColor).toBe('transparent')
+    expect(Math.abs(pastOpacity - releaseOpacity)).toBeLessThan(0.01)
+    expect(pastOpacity).toBeCloseTo(presentation.futureAlpha, 5)
+    expect(tokenNode.style.getPropertyValue('--lyrics-progress')).toBe('1')
+  })
+
   it('uses smooth subpixel character transforms for long token durations', () => {
     const audio = createAudio({ currentTime: 1, duration: 5, paused: true })
     const longLines = [

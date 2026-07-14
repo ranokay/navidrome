@@ -99,30 +99,48 @@ const setGradientTokenColor = (record) => {
   record.node.style.webkitBackgroundClip = 'text'
 }
 
+const getInactiveTokenOpacity = (presentation = {}) => {
+  const activeAlpha = Math.max(0.001, presentation.activeAlpha ?? 1)
+  return Math.min(
+    1,
+    Math.max(0, (presentation.futureAlpha ?? 0.34) / activeAlpha),
+  )
+}
+
+const isGradientTokenState = (state) =>
+  state === 'active' ||
+  state === 'completed' ||
+  state === 'release' ||
+  state === 'inactive-past'
+
 const applyTokenState = (record, state, progress = 0) => {
   const previousState = record.state
   record.state = state
   record.node.dataset.lyricsState = state
   const presentation = record.presentation || {}
 
-  if (state === 'active' || state === 'completed') {
-    const wasGradientState =
-      previousState === 'active' || previousState === 'completed'
-    if (!wasGradientState) {
-      setTokenOpacity(record, 1)
+  if (
+    state === 'active' ||
+    state === 'completed' ||
+    state === 'inactive-past'
+  ) {
+    if (!isGradientTokenState(previousState)) {
       setGradientTokenColor(record)
     }
-    const nextProgress = state === 'completed' ? 1 : progress
+    const nextProgress = state === 'active' ? progress : 1
     setProgress(record, nextProgress)
     setCharacterLift(record, nextProgress)
+    setTokenOpacity(
+      record,
+      state === 'inactive-past' ? getInactiveTokenOpacity(presentation) : 1,
+    )
     return
   }
 
   setTokenOpacity(record, 1)
-
   setSolidTokenColor(record, presentation.futureColor || 'currentColor')
   setProgress(record, 0)
-  setCharacterLift(record, state === 'inactive-past' ? 1 : 0)
+  setCharacterLift(record, 0)
 }
 
 const setTokenReleasePresentation = (record, progress) => {
@@ -133,11 +151,7 @@ const setTokenReleasePresentation = (record, progress) => {
     record.state = 'release'
     record.node.dataset.lyricsState = 'release'
   }
-  const activeAlpha = Math.max(0.001, presentation.activeAlpha ?? 1)
-  const targetOpacity = Math.min(
-    1,
-    Math.max(0, (presentation.futureAlpha ?? 0.34) / activeAlpha),
-  )
+  const targetOpacity = getInactiveTokenOpacity(presentation)
   setTokenOpacity(record, 1 + (targetOpacity - 1) * nextProgress)
 }
 
