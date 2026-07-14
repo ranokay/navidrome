@@ -58,17 +58,16 @@ const KARAOKE_LAYER_COLOR_TRANSITION = `color ${KARAOKE_ANIMATION_MS}ms ${KARAOK
 
 """
 text = replace_once(text, marker, constant, 'shared layer transition constant')
-text = replace_once(
-    text,
-    '    transition: `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,\n',
+old_main_or_translation = '    transition: `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,\n'
+if text.count(old_main_or_translation) != 2:
+    raise RuntimeError(
+        'main/translation transitions: expected two matches, '
+        f'found {text.count(old_main_or_translation)}'
+    )
+text = text.replace(
+    old_main_or_translation,
     '    transition: KARAOKE_LAYER_COLOR_TRANSITION,\n',
-    'main line transition',
-)
-text = replace_once(
-    text,
-    '    transition: `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}, -webkit-text-fill-color ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`,\n',
-    '    transition: KARAOKE_LAYER_COLOR_TRANSITION,\n',
-    'translation line transition',
+    2,
 )
 text = replace_once(
     text,
