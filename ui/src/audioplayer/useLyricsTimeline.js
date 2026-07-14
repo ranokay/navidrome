@@ -8,6 +8,7 @@ import {
 } from 'react'
 import {
   KARAOKE_CHARACTER_LIFT_PX,
+  KARAOKE_CHARACTER_RISE_MS,
   KARAOKE_CHARACTER_WAVE_WIDTH,
   KARAOKE_CLOCK_DRIFT_RESET_MS,
   KARAOKE_HIGHLIGHT_LEAD_MS,
@@ -49,20 +50,29 @@ const setCharacterLift = (record, progress) => {
     (node) => node.dataset.whitespace !== 'true',
   )
   if (!characters.length) return
+
+  const rawDuration = Number(record.window?.end) - Number(record.window?.start)
+  const riseWindow =
+    Number.isFinite(rawDuration) && rawDuration > 0
+      ? Math.min(
+          KARAOKE_CHARACTER_WAVE_WIDTH,
+          KARAOKE_CHARACTER_RISE_MS / rawDuration,
+        )
+      : KARAOKE_CHARACTER_WAVE_WIDTH
   const count = characters.length
-  const travel = Math.max(0, 1 - KARAOKE_CHARACTER_WAVE_WIDTH)
+  const travel = Math.max(0, 1 - riseWindow)
+
   characters.forEach((node, index) => {
     const start = count <= 1 ? 0 : (index / (count - 1)) * travel
     const local = Math.max(
       0,
-      Math.min(
-        1,
-        (progress - start) / Math.max(0.001, KARAOKE_CHARACTER_WAVE_WIDTH),
-      ),
+      Math.min(1, (progress - start) / Math.max(0.001, riseWindow)),
     )
     const offset = -KARAOKE_CHARACTER_LIFT_PX * smoothStep(local)
-    const nextTop = `${offset.toFixed(3)}px`
-    if (node.style.top !== nextTop) node.style.top = nextTop
+    const nextTransform = `translate3d(0, ${offset.toFixed(4)}px, 0)`
+    if (node.style.transform !== nextTransform) {
+      node.style.transform = nextTransform
+    }
   })
 }
 

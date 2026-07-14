@@ -1,6 +1,10 @@
 import { act } from '@testing-library/react'
 import { renderHook } from '@testing-library/react-hooks'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  KARAOKE_CHARACTER_RISE_MS,
+  KARAOKE_CHARACTER_WAVE_WIDTH,
+} from './lyricsKaraokeConstants'
 import useLyricsTimeline from './useLyricsTimeline'
 
 const createAudio = ({
@@ -149,6 +153,61 @@ describe('useLyricsTimeline', () => {
 
     expect(result.current.activeIndexes).toEqual([0, 1])
     expect(result.current.primaryIndex).toBe(1)
+  })
+
+  it('uses smooth subpixel character transforms for long token durations', () => {
+    const audio = createAudio({ currentTime: 1, duration: 5, paused: true })
+    const longLines = [
+      {
+        start: 0,
+        end: 4000,
+        tokens: [{ start: 0, end: 4000, value: 'super' }],
+      },
+    ]
+    const { result } = renderHook(() =>
+      useLyricsTimeline({
+        lines: longLines,
+        audioInstance: audio,
+        visible: true,
+        reducedMotion: false,
+      }),
+    )
+    const tokenNode = document.createElement('span')
+    Array.from('super').forEach((character) => {
+      const node = document.createElement('span')
+      node.dataset.lyricsCharacter = 'true'
+      node.textContent = character
+      tokenNode.appendChild(node)
+    })
+
+    act(() => {
+      result.current.registerToken(
+        '0:long-word',
+        {
+          lineIndex: 0,
+          window: { start: 0, end: 4000 },
+          presentation,
+        },
+        tokenNode,
+      )
+    })
+
+    const character = tokenNode.querySelectorAll(
+      '[data-lyrics-character="true"]',
+    )[1]
+    const transforms = []
+    ;[1000, 1016, 1032, 1048].forEach((time) => {
+      act(() => result.current.syncNow(time, true))
+      transforms.push(character.style.transform)
+    })
+
+    expect(new Set(transforms).size).toBe(transforms.length)
+    transforms.forEach((transform) =>
+      expect(transform).toMatch(/^translate3d\(0, -?\d+\.\d{4}px, 0\)$/),
+    )
+    expect(KARAOKE_CHARACTER_RISE_MS).toBeLessThan(
+      4000 * KARAOKE_CHARACTER_WAVE_WIDTH,
+    )
   })
 
   it('keeps interpolated playback time monotonic between coarse media updates', () => {

@@ -333,8 +333,8 @@ describe('<LyricsPanel />', () => {
     expect(group).toHaveAttribute('data-raised', 'true')
     expect(group).toHaveAttribute('data-line-motion', 'character')
     expect(window.getComputedStyle(group).transform).toBe('translateY(0)')
-    expect(firstCharacter.style.top).toBe(
-      `-${KARAOKE_LINE_LIFT_PX.toFixed(3)}px`,
+    expect(firstCharacter.style.transform).toBe(
+      `translate3d(0, -${KARAOKE_LINE_LIFT_PX.toFixed(4)}px, 0)`,
     )
     expect(KARAOKE_CHARACTER_LIFT_PX).toBe(KARAOKE_LINE_LIFT_PX)
   })
@@ -360,14 +360,14 @@ describe('<LyricsPanel />', () => {
 
     expect(mainCharacters).toHaveLength(4)
     expect(pronunciationCharacters).toHaveLength(4)
-    expect(mainCharacters[0].style.top).toBe(
-      `-${KARAOKE_CHARACTER_LIFT_PX.toFixed(3)}px`,
+    expect(mainCharacters[0].style.transform).toBe(
+      `translate3d(0, -${KARAOKE_CHARACTER_LIFT_PX.toFixed(4)}px, 0)`,
     )
-    expect(
-      Number.parseFloat(mainCharacters[3].style.top || '0'),
-    ).toBeGreaterThan(Number.parseFloat(mainCharacters[0].style.top))
-    expect(pronunciationCharacters[0].style.top).toBe(
-      mainCharacters[0].style.top,
+    expect(mainCharacters[3].style.transform).not.toBe(
+      mainCharacters[0].style.transform,
+    )
+    expect(pronunciationCharacters[0].style.transform).toBe(
+      mainCharacters[0].style.transform,
     )
   })
 
