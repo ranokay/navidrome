@@ -1,0 +1,49 @@
+name: Smooth long character wave
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/smooth-long-character-wave-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: lyrics-sidebar-performance
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Apply smooth wave fix
+        run: python3 .github/scripts/smooth-long-character-wave.py
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+      - name: Format changed files
+        working-directory: ui
+        run: npx prettier --write src/audioplayer/lyricsKaraokeConstants.js src/audioplayer/useLyricsTimeline.js src/audioplayer/LyricsPanel.jsx src/audioplayer/LyricsPanel.test.jsx src/audioplayer/useLyricsTimeline.test.js
+      - name: Validate UI
+        working-directory: ui
+        run: |
+          npm run check-formatting
+          npm run lint
+          npm test
+          npm run build
+      - name: Commit fixes and remove temporary files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/smooth-long-character-wave-once.yml
+          rm -f .github/scripts/smooth-long-character-wave.py
+          git add -A
+          git commit -m "fix(ui): smooth long-duration character waves"
+          git push origin HEAD:lyrics-sidebar-performance
