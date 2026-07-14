@@ -30,15 +30,31 @@ jobs:
         run: npx prettier --write src/audioplayer/lyricsTimeline.js
       - working-directory: ui
         run: |
-          npm run check-formatting
-          npm run lint
-          npm test
-          npm run build
+          set +e
+          {
+            npm run check-formatting
+            npm run lint
+            npm test
+            npm run build
+          } > /tmp/line-duration-validation.log 2>&1
+          status=$?
+          cat /tmp/line-duration-validation.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/line-duration-validation.log ../.github/line-duration-validation-error.txt
+            cd ..
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/line-duration-validation-error.txt
+            git commit -m "chore: capture line duration validation failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f .github/workflows/tune-line-duration-once.yml
           rm -f .github/scripts/tune-line-duration-estimate.py
+          rm -f .github/line-duration-validation-error.txt
           git add -A
           git commit -m "fix(ui): tune inferred line release duration"
           git push origin HEAD:lyrics-sidebar-performance
