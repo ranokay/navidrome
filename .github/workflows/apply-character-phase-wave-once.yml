@@ -34,16 +34,32 @@ jobs:
       - name: Validate UI
         working-directory: ui
         run: |
-          npm run check-formatting
-          npm run lint
-          npm test
-          npm run build
+          set +e
+          {
+            npm run check-formatting
+            npm run lint
+            npm test
+            npm run build
+          } > /tmp/phase-wave-validation.log 2>&1
+          status=$?
+          cat /tmp/phase-wave-validation.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/phase-wave-validation.log ../.github/phase-wave-validation-error.txt
+            cd ..
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/phase-wave-validation-error.txt
+            git commit -m "chore: capture phase wave validation failure"
+            git push origin HEAD:lyrics-sidebar-performance
+            exit 1
+          fi
       - name: Commit fixes and remove temporary files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -f .github/workflows/apply-character-phase-wave-once.yml
           rm -f .github/scripts/apply-character-phase-wave.py
+          rm -f .github/phase-wave-validation-error.txt
           git add -A
           git commit -m "fix(ui): make character rise a bounded phase wave"
           git push origin HEAD:lyrics-sidebar-performance
