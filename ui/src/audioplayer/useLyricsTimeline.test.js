@@ -2,8 +2,9 @@ import { act } from '@testing-library/react'
 import { renderHook } from '@testing-library/react-hooks'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  KARAOKE_CHARACTER_STAGGER_RATIO,
-  KARAOKE_CHARACTER_WAVE_WIDTH,
+  KARAOKE_CHARACTER_LIFT_PX,
+  KARAOKE_CHARACTER_PHASE_SPREAD,
+  KARAOKE_CHARACTER_WAVE_DURATION_MS,
 } from './lyricsKaraokeConstants'
 import useLyricsTimeline from './useLyricsTimeline'
 
@@ -316,8 +317,8 @@ describe('useLyricsTimeline', () => {
     })
   })
 
-  it('uses smooth subpixel character transforms for long token durations', () => {
-    const audio = createAudio({ currentTime: 1, duration: 5, paused: true })
+  it('uses a bounded concurrent phase wave for long token durations', () => {
+    const audio = createAudio({ currentTime: 0, duration: 5, paused: true })
     const longLines = [
       {
         start: 0,
@@ -353,35 +354,42 @@ describe('useLyricsTimeline', () => {
       )
     })
 
-    const character = tokenNode.querySelectorAll(
-      '[data-lyrics-character="true"]',
-    )[1]
-    const transforms = []
-    ;[1000, 1016, 1032, 1048].forEach((time) => {
+    const characters = Array.from(
+      tokenNode.querySelectorAll('[data-lyrics-character="true"]'),
+    )
+    const firstTransforms = []
+    ;[0, 16, 32, 48].forEach((time) => {
       act(() => result.current.syncNow(time, true))
-      transforms.push(character.style.transform)
+      firstTransforms.push(characters[0].style.transform)
     })
 
-    expect(new Set(transforms).size).toBe(transforms.length)
-    transforms.forEach((transform) =>
-      expect(transform).toMatch(/^translateY\(-?\d+\.\d{4}px\)$/),
+    expect(new Set(firstTransforms).size).toBe(firstTransforms.length)
+    firstTransforms.forEach((transform) =>
+      expect(transform).toMatch(/^translateY\(-\d+\.\d{4}px\)$/),
     )
-    expect(KARAOKE_CHARACTER_STAGGER_RATIO).toBeGreaterThan(0.5)
-    expect(KARAOKE_CHARACTER_STAGGER_RATIO).toBeLessThan(1)
 
-    act(() => result.current.syncNow(650, true))
-    const characters = tokenNode.querySelectorAll(
-      '[data-lyrics-character="true"]',
+    act(() => result.current.syncNow(120, true))
+    const offsets = characters.map((character) =>
+      Math.abs(
+        Number.parseFloat(
+          character.style.transform.match(/-?\d+\.\d+/)?.[0] || '0',
+        ),
+      ),
     )
-    const firstOffset = Number.parseFloat(
-      characters[0].style.transform.match(/-?\d+\.\d+/)?.[0] || '0',
+    expect(offsets.filter((offset) => offset > 0)).toHaveLength(5)
+    expect(offsets[0]).toBeGreaterThan(offsets[1])
+    expect(offsets[1]).toBeGreaterThan(offsets[2])
+    expect(offsets[2]).toBeGreaterThan(offsets[3])
+    expect(offsets[3]).toBeGreaterThan(offsets[4])
+
+    act(() => result.current.syncNow(KARAOKE_CHARACTER_WAVE_DURATION_MS, true))
+    characters.forEach((character) =>
+      expect(character.style.transform).toBe(
+        `translateY(-${KARAOKE_CHARACTER_LIFT_PX.toFixed(4)}px)`,
+      ),
     )
-    const secondOffset = Number.parseFloat(
-      characters[1].style.transform.match(/-?\d+\.\d+/)?.[0] || '0',
-    )
-    expect(firstOffset).toBeLessThan(-1)
-    expect(secondOffset).toBeLessThan(0)
-    expect(secondOffset).toBeGreaterThan(firstOffset)
+    expect(KARAOKE_CHARACTER_PHASE_SPREAD).toBeGreaterThan(0)
+    expect(KARAOKE_CHARACTER_PHASE_SPREAD).toBeLessThan(0.5)
   })
 
   it('keeps interpolated playback time monotonic between coarse media updates', () => {

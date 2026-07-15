@@ -8,8 +8,8 @@ import {
 } from 'react'
 import {
   KARAOKE_CHARACTER_LIFT_PX,
-  KARAOKE_CHARACTER_STAGGER_RATIO,
-  KARAOKE_CHARACTER_WAVE_WIDTH,
+  KARAOKE_CHARACTER_PHASE_SPREAD,
+  KARAOKE_CHARACTER_WAVE_DURATION_MS,
   KARAOKE_CLOCK_DRIFT_RESET_MS,
   KARAOKE_HIGHLIGHT_LEAD_MS,
   KARAOKE_LINE_RELEASE_MS,
@@ -52,21 +52,28 @@ const setCharacterLift = (record, progress) => {
   )
   if (!characters.length) return
 
+  const rawDuration = Number(record.window?.end) - Number(record.window?.start)
+  const tokenDuration =
+    Number.isFinite(rawDuration) && rawDuration > 0
+      ? rawDuration
+      : KARAOKE_CHARACTER_WAVE_DURATION_MS
+  const waveDuration = Math.min(
+    tokenDuration,
+    KARAOKE_CHARACTER_WAVE_DURATION_MS,
+  )
+  const elapsed = Math.max(0, Math.min(tokenDuration, progress * tokenDuration))
+  const waveProgress = Math.max(
+    0,
+    Math.min(1, elapsed / Math.max(1, waveDuration)),
+  )
   const count = characters.length
-  const connectedSpan =
-    1 + Math.max(0, count - 1) * KARAOKE_CHARACTER_STAGGER_RATIO
-  const riseWindow =
-    count <= 1
-      ? 1
-      : Math.min(KARAOKE_CHARACTER_WAVE_WIDTH, 1 / Math.max(1, connectedSpan))
-  const stagger = riseWindow * KARAOKE_CHARACTER_STAGGER_RATIO
+  const phaseSpread = count <= 1 ? 0 : KARAOKE_CHARACTER_PHASE_SPREAD
+  const riseSpan = Math.max(0.001, 1 - phaseSpread)
 
   characters.forEach((node, index) => {
-    const start = index * stagger
-    const local = Math.max(
-      0,
-      Math.min(1, (progress - start) / Math.max(0.001, riseWindow)),
-    )
+    const phase =
+      count <= 1 ? 0 : (index / Math.max(1, count - 1)) * phaseSpread
+    const local = Math.max(0, Math.min(1, (waveProgress - phase) / riseSpan))
     const lift = Math.max(
       0,
       Math.min(
