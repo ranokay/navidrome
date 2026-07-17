@@ -35,5 +35,5 @@ var Set = wire.NewSet(
 	scrobbler.GetPlayTracker,
 	playback.GetInstance,
 	metrics.GetInstance,
-	lyrics.NewLyrics,
+	lyrics.NewLyricsWithMetrics,
 )

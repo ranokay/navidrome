@@ -367,6 +367,36 @@ var _ = Describe("Lyrics", func() {
 		})
 	})
 
+	It("records low-cardinality source outcomes", func() {
+		recorder := &resolutionRecorder{}
+		mockLoader := &mockPluginLoader{notFound: true}
+		mf.Lyrics = ""
+		conf.Server.LyricsPriority = "embedded,.missing,test-lyrics-plugin"
+
+		svc := lyrics.NewLyrics(nil, mockLoader, lyrics.WithResolutionMetrics(recorder))
+		list, err := svc.GetLyrics(ctx, &mf)
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(list).To(BeEmpty())
+		Expect(recorder.labels()).To(Equal([]string{"embedded/empty", "sidecar/empty", "plugin/empty"}))
+		for _, attempt := range recorder.attempts {
+			Expect(attempt.elapsed).To(BeNumerically(">=", 0))
+		}
+	})
+
+	It("records errors before continuing to a lower-priority source", func() {
+		recorder := &resolutionRecorder{}
+		mockLoader := &mockPluginLoader{err: fmt.Errorf("plugin error")}
+		conf.Server.LyricsPriority = "test-lyrics-plugin,embedded"
+
+		svc := lyrics.NewLyrics(nil, mockLoader, lyrics.WithResolutionMetrics(recorder))
+		list, err := svc.GetLyrics(ctx, &mf)
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(list).To(Equal(embeddedLyrics))
+		Expect(recorder.labels()).To(Equal([]string{"plugin/error", "embedded/found"}))
+	})
+
 	var _ = Describe("GetLyricsByArtistTitle", func() {
 		var svc lyrics.Lyrics
 		var repo *tests.MockMediaFileRepo
@@ -417,6 +447,28 @@ type mockPluginLoader struct {
 	err        error
 	notFound   bool
 	pluginName string // expected plugin name (exact match, like real manager)
+}
+
+type resolutionAttempt struct {
+	source  string
+	outcome string
+	elapsed int64
+}
+
+type resolutionRecorder struct {
+	attempts []resolutionAttempt
+}
+
+func (r *resolutionRecorder) RecordLyricsResolution(_ context.Context, source, outcome string, elapsed int64) {
+	r.attempts = append(r.attempts, resolutionAttempt{source: source, outcome: outcome, elapsed: elapsed})
+}
+
+func (r *resolutionRecorder) labels() []string {
+	labels := make([]string, len(r.attempts))
+	for i, attempt := range r.attempts {
+		labels[i] = attempt.source + "/" + attempt.outcome
+	}
+	return labels
 }
 
 func (m *mockPluginLoader) PluginNames(_ string) []string {
