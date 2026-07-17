@@ -22,6 +22,7 @@ type Metrics interface {
 	WriteAfterScanMetrics(ctx context.Context, success bool)
 	RecordRequest(ctx context.Context, endpoint, method, client string, status int32, elapsed int64)
 	RecordPluginRequest(ctx context.Context, plugin, method string, ok bool, elapsed int64)
+	RecordLyricsResolution(ctx context.Context, source, outcome string, elapsed int64)
 	GetHandler() http.Handler
 }
 
@@ -88,6 +89,12 @@ func (m *metrics) RecordPluginRequest(_ context.Context, plugin, method string, 
 	getPrometheusMetrics().pluginRequestDuration.With(pluginLatencyLabel).Observe(float64(elapsed))
 }
 
+func (m *metrics) RecordLyricsResolution(_ context.Context, source, outcome string, elapsed int64) {
+	labels := prometheus.Labels{"source": source, "outcome": outcome}
+	getPrometheusMetrics().lyricsResolutionCounter.With(labels).Inc()
+	getPrometheusMetrics().lyricsResolutionDuration.With(labels).Observe(float64(elapsed))
+}
+
 func (m *metrics) GetHandler() http.Handler {
 	r := chi.NewRouter()
 
@@ -107,19 +114,22 @@ func (m *metrics) GetHandler() http.Handler {
 }
 
 type prometheusMetrics struct {
-	dbTotal               *prometheus.GaugeVec
-	versionInfo           *prometheus.GaugeVec
-	lastMediaScan         *prometheus.GaugeVec
-	mediaScansCounter     *prometheus.CounterVec
-	httpRequestCounter    *prometheus.CounterVec
-	httpRequestDuration   *prometheus.SummaryVec
-	pluginRequestCounter  *prometheus.CounterVec
-	pluginRequestDuration *prometheus.SummaryVec
+	dbTotal                  *prometheus.GaugeVec
+	versionInfo              *prometheus.GaugeVec
+	lastMediaScan            *prometheus.GaugeVec
+	mediaScansCounter        *prometheus.CounterVec
+	httpRequestCounter       *prometheus.CounterVec
+	httpRequestDuration      *prometheus.SummaryVec
+	pluginRequestCounter     *prometheus.CounterVec
+	pluginRequestDuration    *prometheus.SummaryVec
+	lyricsResolutionCounter  *prometheus.CounterVec
+	lyricsResolutionDuration *prometheus.SummaryVec
 }
 
 // Prometheus' metrics requires initialization. But not more than once
 var getPrometheusMetrics = sync.OnceValue(func() *prometheusMetrics {
 	quartilesToEstimate := map[float64]float64{0.5: 0.05, 0.75: 0.025, 0.9: 0.01, 0.99: 0.001}
+	lyricsQuantiles := map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.95: 0.005, 0.99: 0.001}
 
 	instance := &prometheusMetrics{
 		dbTotal: prometheus.NewGaugeVec(
@@ -180,6 +190,21 @@ var getPrometheusMetrics = sync.OnceValue(func() *prometheusMetrics {
 			},
 			[]string{"plugin", "method"},
 		),
+		lyricsResolutionCounter: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "lyrics_resolution_count",
+				Help: "Lyrics source resolution attempts by source and outcome",
+			},
+			[]string{"source", "outcome"},
+		),
+		lyricsResolutionDuration: prometheus.NewSummaryVec(
+			prometheus.SummaryOpts{
+				Name:       "lyrics_resolution_latency",
+				Help:       "Latency (in ms) of lyrics source resolution attempts",
+				Objectives: lyricsQuantiles,
+			},
+			[]string{"source", "outcome"},
+		),
 	}
 
 	prometheus.DefaultRegisterer.MustRegister(
@@ -191,6 +216,8 @@ var getPrometheusMetrics = sync.OnceValue(func() *prometheusMetrics {
 		instance.httpRequestDuration,
 		instance.pluginRequestCounter,
 		instance.pluginRequestDuration,
+		instance.lyricsResolutionCounter,
+		instance.lyricsResolutionDuration,
 	)
 
 	return instance
@@ -236,5 +263,7 @@ func (n noopMetrics) WriteAfterScanMetrics(context.Context, bool) {}
 func (n noopMetrics) RecordRequest(context.Context, string, string, string, int32, int64) {}
 
 func (n noopMetrics) RecordPluginRequest(context.Context, string, string, bool, int64) {}
+
+func (n noopMetrics) RecordLyricsResolution(context.Context, string, string, int64) {}
 
 func (n noopMetrics) GetHandler() http.Handler { return nil }

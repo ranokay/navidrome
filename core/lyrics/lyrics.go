@@ -3,6 +3,7 @@ package lyrics
 import (
 	"context"
 	"strings"
+	"time"
 
 	. "github.com/Masterminds/squirrel"
 	"github.com/navidrome/navidrome/conf"
@@ -34,15 +35,51 @@ type PluginLoader interface {
 	LoadLyricsProvider(name string) (Provider, bool)
 }
 
+// ResolutionMetrics records one source-resolution attempt. Implementations
+// must keep source and outcome labels low-cardinality; lyricsService supplies
+// only the fixed values defined below.
+type ResolutionMetrics interface {
+	RecordLyricsResolution(ctx context.Context, source, outcome string, elapsed int64)
+}
+
+type noopResolutionMetrics struct{}
+
+func (noopResolutionMetrics) RecordLyricsResolution(context.Context, string, string, int64) {}
+
+// Option configures a lyrics service without changing the existing two-argument
+// NewLyrics call sites.
+type Option func(*lyricsService)
+
+// WithResolutionMetrics records source attempts through metrics.
+func WithResolutionMetrics(metrics ResolutionMetrics) Option {
+	return func(service *lyricsService) {
+		if metrics != nil {
+			service.metrics = metrics
+		}
+	}
+}
+
 type lyricsService struct {
 	ds           model.DataStore
 	pluginLoader PluginLoader
+	metrics      ResolutionMetrics
 }
 
 // NewLyrics creates a new lyrics service. pluginLoader may be nil if no plugin
 // system is available.
-func NewLyrics(ds model.DataStore, pluginLoader PluginLoader) Lyrics {
-	return &lyricsService{ds: ds, pluginLoader: pluginLoader}
+func NewLyrics(ds model.DataStore, pluginLoader PluginLoader, options ...Option) Lyrics {
+	service := &lyricsService{ds: ds, pluginLoader: pluginLoader, metrics: noopResolutionMetrics{}}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service
+}
+
+// NewLyricsWithMetrics is the non-variadic production provider used by Wire.
+func NewLyricsWithMetrics(ds model.DataStore, pluginLoader PluginLoader, metrics ResolutionMetrics) Lyrics {
+	return NewLyrics(ds, pluginLoader, WithResolutionMetrics(metrics))
 }
 
 // GetLyrics returns lyrics for the given media file, trying sources in the
@@ -114,12 +151,42 @@ func (l *lyricsService) getLyricsForCandidates(ctx context.Context, mediaFiles [
 }
 
 func (l *lyricsService) getLyricsFromSource(ctx context.Context, mf *model.MediaFile, pattern string) (model.LyricList, error) {
+	started := time.Now()
+	source := lyricsSource(pattern)
+
+	var (
+		lyricsList model.LyricList
+		err        error
+	)
 	switch {
 	case strings.EqualFold(pattern, "embedded"):
-		return fromEmbedded(ctx, mf)
+		lyricsList, err = fromEmbedded(ctx, mf)
 	case strings.HasPrefix(pattern, "."):
-		return fromExternalFile(ctx, mf, pattern)
+		lyricsList, err = fromExternalFile(ctx, mf, pattern)
 	default:
-		return l.fromPlugin(ctx, mf, pattern)
+		lyricsList, err = l.fromPlugin(ctx, mf, pattern)
 	}
+
+	l.metrics.RecordLyricsResolution(ctx, source, lyricsOutcome(lyricsList, err), time.Since(started).Milliseconds())
+	return lyricsList, err
+}
+
+func lyricsSource(pattern string) string {
+	if strings.EqualFold(pattern, "embedded") {
+		return "embedded"
+	}
+	if strings.HasPrefix(pattern, ".") {
+		return "sidecar"
+	}
+	return "plugin"
+}
+
+func lyricsOutcome(lyricsList model.LyricList, err error) string {
+	if err != nil {
+		return "error"
+	}
+	if len(lyricsList) > 0 {
+		return "found"
+	}
+	return "empty"
 }
