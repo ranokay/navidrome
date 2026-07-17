@@ -23,7 +23,9 @@ func parseSRT(language string, contents []byte) (LyricList, error) {
 	for _, block := range blocks {
 		line, ok, err := parseSRTBlock(block)
 		if err != nil {
-			return nil, err
+			// Reject malformed timing locally so one bad subtitle block does not
+			// discard every valid block in the document.
+			continue
 		}
 		if ok {
 			lines = append(lines, line)
@@ -35,6 +37,7 @@ func parseSRT(language string, contents []byte) (LyricList, error) {
 	}
 
 	lyrics := normalizeLyrics(Lyrics{
+		Format: LyricFormatSRT,
 		Lang:   normalizeLyricLang(language),
 		Line:   lines,
 		Synced: true,

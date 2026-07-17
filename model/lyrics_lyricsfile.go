@@ -41,6 +41,7 @@ func parseLyricsfile(lang string, contents []byte) (LyricList, error) {
 	lyrics := Lyrics{
 		DisplayArtist: str.SanitizeText(doc.Metadata.Artist),
 		DisplayTitle:  str.SanitizeText(doc.Metadata.Title),
+		Format:        LyricFormatLyricsfile,
 		Lang:          normalizeLyricLang(docLang),
 		Kind:          LyricKindMain,
 	}
@@ -50,6 +51,15 @@ func parseLyricsfile(lang string, contents []byte) (LyricList, error) {
 	}
 
 	if doc.Metadata.Instrumental {
+		line := Line{Instrumental: true}
+		if doc.Metadata.DurationMs > 0 {
+			start := int64(0)
+			end := doc.Metadata.DurationMs
+			line.Start = &start
+			line.End = &end
+			lyrics.Synced = true
+		}
+		lyrics.Line = []Line{line}
 		return LyricList{normalizeLyrics(lyrics)}, nil
 	}
 
@@ -222,10 +232,13 @@ func buildPlainLyricsfileLines(plain string) []Line {
 	lines := make([]Line, 0, len(rawLines))
 	for _, raw := range rawLines {
 		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
 		lines = append(lines, Line{Value: value})
+	}
+	for len(lines) > 0 && lines[0].Value == "" {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && lines[len(lines)-1].Value == "" {
+		lines = lines[:len(lines)-1]
 	}
 	return lines
 }
@@ -265,6 +278,7 @@ func wordsToLineCues(entry lyricsfileLineEntry, agentID string) ([]Cue, string) 
 			ByteStart: bs,
 			ByteEnd:   be,
 			AgentID:   agentID,
+			Precision: LyricPrecisionWord,
 		}
 		if w.EndMs != nil {
 			e := *w.EndMs

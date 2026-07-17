@@ -106,11 +106,11 @@ var _ = Describe("ToMediaFile", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			expected := model.LyricList{
-				{Lang: "eng", Line: []model.Line{
+				{Lang: "eng", Format: model.LyricFormatLRC, Line: []model.Line{
 					{Value: "This is", Start: new(int64(0))},
 					{Value: "English SYLT", Start: new(int64(2500))},
 				}, Synced: true},
-				{Lang: "xxx", Line: []model.Line{{Value: "Lyrics"}}, Synced: false},
+				{Lang: "xxx", Format: model.LyricFormatPlain, Line: []model.Line{{Value: "Lyrics"}}, Synced: false},
 			}
 			sort.Slice(actual, func(i, j int) bool { return actual[i].Lang < actual[j].Lang })
 			sort.Slice(expected, func(i, j int) bool { return expected[i].Lang < expected[j].Lang })

@@ -417,7 +417,8 @@ func (p *ttmlParser) parseInlineElement(start xml.StartElement, parent ttmlTimin
 				tokenText := sanitizeTTMLText(rawValue)
 				if tokenText != "" {
 					parsedToken := Cue{
-						AgentID: p.resolveCueAgentID(ctx),
+						AgentID:   p.resolveCueAgentID(ctx),
+						Precision: LyricPrecisionSegment,
 					}
 					if ctx.hasBegin {
 						startMs := ctx.begin
@@ -696,6 +697,7 @@ func (p *ttmlParser) buildMetadataLyrics(kind string, langOrder []string, entrie
 }
 
 func (p *ttmlParser) finalizeLyrics(lyrics Lyrics) Lyrics {
+	lyrics.Format = LyricFormatTTML
 	lyrics.Line, lyrics.Agents = p.resolveAgents(lyrics.Line)
 	return normalizeLyrics(lyrics)
 }

@@ -28,7 +28,7 @@ var _ = Describe("parseLRC", func() {
 		Expect(lyrics.Synced).To(BeTrue())
 		Expect(lyrics.Line).To(Equal([]Line{
 			{Start: new(int64(0)), Value: "Hi there"},
-			{Start: new(int64(10040)), Value: ""},
+			{Start: new(int64(10040)), Value: "", Instrumental: true},
 			{Start: new(int64(40000)), Value: "Test"},
 			{Start: new(int64(1000 * 60 * 60)), Value: "late"},
 		}))
@@ -41,8 +41,8 @@ var _ = Describe("parseLRC", func() {
 		Expect(lyrics.Line).To(Equal([]Line{
 			{Start: new(int64(0)), Value: "Repeated"},
 			{Start: new(int64(10000)), Value: "Repeated"},
-			{Start: new(int64(13 * 60 * 1000)), Value: ""},
-			{Start: new(int64(1000 * 60 * 60 * 51)), Value: ""},
+			{Start: new(int64(13 * 60 * 1000)), Value: "", Instrumental: true},
+			{Start: new(int64(1000 * 60 * 60 * 51)), Value: "", Instrumental: true},
 		}))
 	})
 
@@ -65,10 +65,22 @@ var _ = Describe("parseLRC", func() {
 		}))
 	})
 
+	It("preserves paragraph spacing for plain lyrics", func() {
+		lyrics, err := parseLRC("eng", "Verse one\n\nVerse two\n")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(lyrics.Format).To(Equal(LyricFormatPlain))
+		Expect(lyrics.Line).To(Equal([]Line{
+			{Value: "Verse one"},
+			{Value: ""},
+			{Value: "Verse two"},
+		}))
+	})
+
 	It("Allows timestamp in middle of line if also at beginning", func() {
 		lyrics, err := parseLRC("xxx", "  [00:00] This is [00:00:00] be a synced file\n		[00:01]Line 2")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(lyrics.Synced).To(BeTrue())
+		Expect(lyrics.Format).To(Equal(LyricFormatLRC))
 		Expect(lyrics.Line).To(Equal([]Line{
 			{Start: new(int64(0)), Value: "This is [00:00:00] be a synced file"},
 			{Start: new(int64(1000)), Value: "Line 2"},
@@ -112,6 +124,7 @@ var _ = Describe("parseLRC", func() {
 		lyrics, err := parseLRC("xxx", "[00:01.00]<00:01.00>Some <00:01.50>lyrics <00:02.00>here\n[00:03.00]<00:03.00>More <00:03.50>words")
 		Expect(err).ToNot(HaveOccurred())
 		Expect(lyrics.Synced).To(BeTrue())
+		Expect(lyrics.Format).To(Equal(LyricFormatELRC))
 		Expect(lyrics.Line).To(HaveLen(2))
 
 		t1000, t1500, t2000, t3000, t3500 := int64(1000), int64(1500), int64(2000), int64(3000), int64(3500)
@@ -121,9 +134,9 @@ var _ = Describe("parseLRC", func() {
 		Expect(line0.End).To(Equal(&t3000))
 		Expect(line0.Value).To(Equal("Some lyrics here"))
 		Expect(line0.Cue).To(Equal([]Cue{
-			{Start: &t1000, End: &t1500, Value: "Some ", ByteStart: 0, ByteEnd: 4},
-			{Start: &t1500, End: &t2000, Value: "lyrics ", ByteStart: 5, ByteEnd: 11},
-			{Start: &t2000, End: &t3000, Value: "here", ByteStart: 12, ByteEnd: 15},
+			{Start: &t1000, End: &t1500, Value: "Some ", ByteStart: 0, ByteEnd: 4, Precision: LyricPrecisionSegment},
+			{Start: &t1500, End: &t2000, Value: "lyrics ", ByteStart: 5, ByteEnd: 11, Precision: LyricPrecisionSegment},
+			{Start: &t2000, End: &t3000, Value: "here", ByteStart: 12, ByteEnd: 15, Precision: LyricPrecisionSegment},
 		}))
 
 		line1 := lyrics.Line[1]
@@ -131,8 +144,8 @@ var _ = Describe("parseLRC", func() {
 		Expect(line1.End).To(Equal(&t3500))
 		Expect(line1.Value).To(Equal("More words"))
 		Expect(line1.Cue).To(Equal([]Cue{
-			{Start: &t3000, Value: "More ", ByteStart: 0, ByteEnd: 4},
-			{Start: &t3500, Value: "words", ByteStart: 5, ByteEnd: 9},
+			{Start: &t3000, Value: "More ", ByteStart: 0, ByteEnd: 4, Precision: LyricPrecisionSegment},
+			{Start: &t3500, Value: "words", ByteStart: 5, ByteEnd: 9, Precision: LyricPrecisionSegment},
 		}))
 
 		Expect(line1.Cue[1].End).To(BeNil())
@@ -156,8 +169,8 @@ var _ = Describe("parseLRC", func() {
 		t3000 := int64(3000)
 
 		Expect(lyrics.Line[0].Cue).To(Equal([]Cue{
-			{Start: &t1000, End: &t1500, Value: "Some ", ByteStart: 0, ByteEnd: 4},
-			{Start: &t1500, End: &t3000, Value: "lyrics", ByteStart: 5, ByteEnd: 10},
+			{Start: &t1000, End: &t1500, Value: "Some ", ByteStart: 0, ByteEnd: 4, Precision: LyricPrecisionSegment},
+			{Start: &t1500, End: &t3000, Value: "lyrics", ByteStart: 5, ByteEnd: 10, Precision: LyricPrecisionSegment},
 		}))
 		Expect(lyrics.Line[0].Value).To(Equal("Some lyrics"))
 		Expect(lyrics.Line[0].End).To(Equal(&t3000))
@@ -166,8 +179,8 @@ var _ = Describe("parseLRC", func() {
 		Expect(lyrics.Line[1].Value).To(Equal("Plain line"))
 
 		Expect(lyrics.Line[2].Cue).To(Equal([]Cue{
-			{Start: &t5000, Value: "More ", ByteStart: 0, ByteEnd: 4},
-			{Start: &t5500, Value: "words", ByteStart: 5, ByteEnd: 9},
+			{Start: &t5000, Value: "More ", ByteStart: 0, ByteEnd: 4, Precision: LyricPrecisionSegment},
+			{Start: &t5500, Value: "words", ByteStart: 5, ByteEnd: 9, Precision: LyricPrecisionSegment},
 		}))
 		Expect(lyrics.Line[2].Value).To(Equal("More words"))
 	})
@@ -181,10 +194,10 @@ var _ = Describe("parseLRC", func() {
 		line := lyrics.Line[0]
 		Expect(line.Value).To(Equal("Oh love me tonight"))
 		Expect(line.Cue).To(Equal([]Cue{
-			{Start: &t0, Value: "Oh ", ByteStart: 0, ByteEnd: 2},
-			{Start: &t900, Value: "love", ByteStart: 3, ByteEnd: 6},
-			{Start: &t1300, Value: " me ", ByteStart: 7, ByteEnd: 10},
-			{Start: &t1600, Value: "tonight", ByteStart: 11, ByteEnd: 17},
+			{Start: &t0, Value: "Oh ", ByteStart: 0, ByteEnd: 2, Precision: LyricPrecisionSegment},
+			{Start: &t900, Value: "love", ByteStart: 3, ByteEnd: 6, Precision: LyricPrecisionSegment},
+			{Start: &t1300, Value: " me ", ByteStart: 7, ByteEnd: 10, Precision: LyricPrecisionSegment},
+			{Start: &t1600, Value: "tonight", ByteStart: 11, ByteEnd: 17, Precision: LyricPrecisionSegment},
 		}))
 	})
 
@@ -198,8 +211,8 @@ var _ = Describe("parseLRC", func() {
 		Expect(line.Value).To(Equal("Some lyrics"))
 		Expect(line.End).To(Equal(&t2000))
 		Expect(line.Cue).To(Equal([]Cue{
-			{Start: &t1000, End: &t1500, Value: "Some ", ByteStart: 0, ByteEnd: 4},
-			{Start: &t1500, End: &t2000, Value: "lyrics", ByteStart: 5, ByteEnd: 10},
+			{Start: &t1000, End: &t1500, Value: "Some ", ByteStart: 0, ByteEnd: 4, Precision: LyricPrecisionSegment},
+			{Start: &t1500, End: &t2000, Value: "lyrics", ByteStart: 5, ByteEnd: 10, Precision: LyricPrecisionSegment},
 		}))
 	})
 
@@ -213,14 +226,14 @@ var _ = Describe("parseLRC", func() {
 
 		Expect(lyrics.Line[0].End).To(Equal(&t10900))
 		Expect(lyrics.Line[0].Cue).To(Equal([]Cue{
-			{Start: &t10100, End: &t10500, Value: "Hello ", ByteStart: 0, ByteEnd: 5},
-			{Start: &t10500, End: &t10900, Value: "world", ByteStart: 6, ByteEnd: 10},
+			{Start: &t10100, End: &t10500, Value: "Hello ", ByteStart: 0, ByteEnd: 5, Precision: LyricPrecisionSegment},
+			{Start: &t10500, End: &t10900, Value: "world", ByteStart: 6, ByteEnd: 10, Precision: LyricPrecisionSegment},
 		}))
 
 		Expect(lyrics.Line[1].End).To(Equal(&t30900))
 		Expect(lyrics.Line[1].Cue).To(Equal([]Cue{
-			{Start: &t30100, End: &t30500, Value: "Hello ", ByteStart: 0, ByteEnd: 5},
-			{Start: &t30500, End: &t30900, Value: "world", ByteStart: 6, ByteEnd: 10},
+			{Start: &t30100, End: &t30500, Value: "Hello ", ByteStart: 0, ByteEnd: 5, Precision: LyricPrecisionSegment},
+			{Start: &t30500, End: &t30900, Value: "world", ByteStart: 6, ByteEnd: 10, Precision: LyricPrecisionSegment},
 		}))
 	})
 
@@ -240,16 +253,16 @@ var _ = Describe("parseLRC", func() {
 		Expect(lyrics.Line[0].End).To(Equal(&t30000))
 		Expect(lyrics.Line[0].Value).To(Equal("Hello world"))
 		Expect(lyrics.Line[0].Cue).To(Equal([]Cue{
-			{Start: &t10100, End: &t10500, Value: "Hello ", ByteStart: 0, ByteEnd: 5},
-			{Start: &t10500, End: &t30000, Value: "world", ByteStart: 6, ByteEnd: 10},
+			{Start: &t10100, End: &t10500, Value: "Hello ", ByteStart: 0, ByteEnd: 5, Precision: LyricPrecisionSegment},
+			{Start: &t10500, End: &t30000, Value: "world", ByteStart: 6, ByteEnd: 10, Precision: LyricPrecisionSegment},
 		}))
 
 		Expect(lyrics.Line[1].Start).To(Equal(&t30000))
 		Expect(lyrics.Line[1].End).To(Equal(&t30500))
 		Expect(lyrics.Line[1].Value).To(Equal("Hello world"))
 		Expect(lyrics.Line[1].Cue).To(Equal([]Cue{
-			{Start: &t30100, Value: "Hello ", ByteStart: 0, ByteEnd: 5},
-			{Start: &t30500, Value: "world", ByteStart: 6, ByteEnd: 10},
+			{Start: &t30100, Value: "Hello ", ByteStart: 0, ByteEnd: 5, Precision: LyricPrecisionSegment},
+			{Start: &t30500, Value: "world", ByteStart: 6, ByteEnd: 10, Precision: LyricPrecisionSegment},
 		}))
 	})
 })

@@ -12,6 +12,7 @@ type Cue struct {
 	ByteStart int    `structs:"byteStart"         json:"byteStart"`
 	ByteEnd   int    `structs:"byteEnd"           json:"byteEnd"`
 	AgentID   string `structs:"agentId,omitempty" json:"agentId,omitempty"`
+	Precision string `structs:"precision,omitempty" json:"precision,omitempty"`
 }
 
 type Agent struct {
@@ -21,16 +22,18 @@ type Agent struct {
 }
 
 type Line struct {
-	Start *int64 `structs:"start,omitempty" json:"start,omitempty"`
-	End   *int64 `structs:"end,omitempty"   json:"end,omitempty"`
-	Value string `structs:"value"           json:"value"`
-	Cue   []Cue  `structs:"cue,omitempty"   json:"cue,omitempty"`
+	Start        *int64 `structs:"start,omitempty"        json:"start,omitempty"`
+	End          *int64 `structs:"end,omitempty"          json:"end,omitempty"`
+	Value        string `structs:"value"                  json:"value"`
+	Cue          []Cue  `structs:"cue,omitempty"          json:"cue,omitempty"`
+	Instrumental bool   `structs:"instrumental,omitempty" json:"instrumental,omitempty"`
 }
 
 type Lyrics struct {
 	DisplayArtist string  `structs:"displayArtist,omitempty" json:"displayArtist,omitempty"`
 	DisplayTitle  string  `structs:"displayTitle,omitempty"  json:"displayTitle,omitempty"`
 	Kind          string  `structs:"kind,omitempty"          json:"kind,omitempty"`
+	Format        string  `structs:"format,omitempty"        json:"format,omitempty"`
 	Lang          string  `structs:"lang"                    json:"lang"`
 	Agents        []Agent `structs:"agents,omitempty"       json:"agents,omitempty"`
 	Line          []Line  `structs:"line"                    json:"line"`
@@ -44,6 +47,27 @@ const (
 	LyricKindMain          = "main"
 	LyricKindTranslation   = "translation"
 	LyricKindPronunciation = "pronunciation"
+)
+
+// Lyric formats describe the source syntax parsed during scanning. They are
+// persisted with the internal lyrics model so the web UI can select honest
+// rendering behavior without reparsing the source text.
+const (
+	LyricFormatPlain      = "plain"
+	LyricFormatLRC        = "lrc"
+	LyricFormatELRC       = "elrc"
+	LyricFormatSRT        = "srt"
+	LyricFormatTTML       = "ttml"
+	LyricFormatLyricsfile = "lyricsfile"
+)
+
+// Cue precision identifies what a cue actually times. Generic TTML spans and
+// ELRC fragments stay segments unless their source explicitly says more.
+const (
+	LyricPrecisionWord      = "word"
+	LyricPrecisionSyllable  = "syllable"
+	LyricPrecisionSegment   = "segment"
+	LyricPrecisionCharacter = "character"
 )
 
 func (l Lyrics) IsEmpty() bool {

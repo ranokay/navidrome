@@ -111,6 +111,7 @@ plain: |
 		Expect(l.Line).To(Equal([]Line{
 			{Value: "[Verse 1]"},
 			{Value: "First line"},
+			{Value: ""},
 			{Value: "Second line"},
 		}))
 	})
@@ -255,7 +256,7 @@ lines:
 		Expect(l.Line[1].Cue[0].ByteEnd).To(Equal(3))
 	})
 
-	It("emits empty lines with Synced=false for instrumental tracks", func() {
+	It("preserves an instrumental marker without inventing timing", func() {
 		input := `version: '1.0'
 metadata:
   title: 'Solo Piano'
@@ -273,8 +274,23 @@ metadata:
 		Expect(l.DisplayArtist).To(Equal("Composer"))
 		Expect(l.DisplayTitle).To(Equal("Solo Piano"))
 		Expect(l.Synced).To(BeFalse())
-		Expect(l.Line).To(BeEmpty())
+		Expect(l.Line).To(Equal([]Line{{Instrumental: true}}))
 		Expect(l.Agents).To(BeNil())
+	})
+
+	It("uses Lyricsfile duration for a timed instrumental track", func() {
+		input := `version: '1.0'
+metadata:
+  instrumental: true
+  duration_ms: 42000
+`
+		lyrics, err := parseLyricsfile("", []byte(input))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(lyrics).To(HaveLen(1))
+		Expect(lyrics[0].Synced).To(BeTrue())
+		Expect(lyrics[0].Line).To(Equal([]Line{{
+			Start: new(int64(0)), End: new(int64(42000)), Instrumental: true,
+		}}))
 	})
 
 	It("strips agent attribution when overlapping lines carry no cues", func() {

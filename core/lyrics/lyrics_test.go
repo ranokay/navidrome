@@ -35,6 +35,7 @@ var _ = Describe("Lyrics", func() {
 		model.Lyrics{
 			DisplayArtist: "Rick Astley",
 			DisplayTitle:  "That one song",
+			Format:        model.LyricFormatLRC,
 			Lang:          "eng",
 			Line: []model.Line{
 				{
@@ -55,6 +56,7 @@ var _ = Describe("Lyrics", func() {
 		model.Lyrics{
 			DisplayArtist: "ELRC Artist",
 			DisplayTitle:  "ELRC Song",
+			Format:        model.LyricFormatELRC,
 			Lang:          "eng",
 			Line: []model.Line{
 				{
@@ -68,6 +70,7 @@ var _ = Describe("Lyrics", func() {
 							Value:     "Lead ",
 							ByteStart: 0,
 							ByteEnd:   4,
+							Precision: model.LyricPrecisionSegment,
 						},
 						{
 							Start:     new(int64(1500)),
@@ -75,6 +78,7 @@ var _ = Describe("Lyrics", func() {
 							Value:     "words",
 							ByteStart: 5,
 							ByteEnd:   9,
+							Precision: model.LyricPrecisionSegment,
 						},
 					},
 				},
@@ -89,8 +93,9 @@ var _ = Describe("Lyrics", func() {
 
 	ttmlLyrics := model.LyricList{
 		model.Lyrics{
-			Kind: "main",
-			Lang: "eng",
+			Kind:   "main",
+			Format: model.LyricFormatTTML,
+			Lang:   "eng",
 			Line: []model.Line{
 				{
 					Start: new(int64(18800)),
@@ -104,8 +109,9 @@ var _ = Describe("Lyrics", func() {
 			Synced: true,
 		},
 		model.Lyrics{
-			Kind: "main",
-			Lang: "por",
+			Kind:   "main",
+			Format: model.LyricFormatTTML,
+			Lang:   "por",
 			Line: []model.Line{
 				{
 					Start: new(int64(18800)),
@@ -118,7 +124,8 @@ var _ = Describe("Lyrics", func() {
 
 	unsyncedLyrics := model.LyricList{
 		model.Lyrics{
-			Lang: "xxx",
+			Format: model.LyricFormatPlain,
+			Lang:   "xxx",
 			Line: []model.Line{
 				{
 					Value: "We're no strangers to love",
@@ -133,7 +140,8 @@ var _ = Describe("Lyrics", func() {
 
 	srtLyrics := model.LyricList{
 		model.Lyrics{
-			Lang: "xxx",
+			Format: model.LyricFormatSRT,
+			Lang:   "xxx",
 			Line: []model.Line{
 				{
 					Start: new(int64(18800)),

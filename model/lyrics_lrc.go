@@ -37,6 +37,10 @@ func parseLRC(language, text string) (*Lyrics, error) {
 	var offset *int64 = nil
 
 	synced := syncRegex.MatchString(text)
+	if !synced {
+		return parsePlainLRCLines(language, lines), nil
+	}
+
 	priorLine := ""
 	validLine := false
 	repeated := false
@@ -50,96 +54,68 @@ func parseLRC(language, text string) (*Lyrics, error) {
 			}
 			continue
 		}
-		var text string
-		var time *int64 = nil
-
-		if synced {
-			idTag := lrcIdRegex.FindStringSubmatch(line)
-			if idTag != nil {
-				switch idTag[1] {
-				case "ar":
-					artist = str.SanitizeText(strings.TrimSpace(idTag[2]))
-				case "lang":
-					language = str.SanitizeText(strings.TrimSpace(idTag[2]))
-				case "offset":
-					{
-						off, err := strconv.ParseInt(strings.TrimSpace(idTag[2]), 10, 64)
-						if err != nil {
-							log.Warn("Error parsing offset", "offset", idTag[2], "error", err)
-						} else {
-							offset = &off
-						}
-					}
-				case "ti":
-					title = str.SanitizeText(strings.TrimSpace(idTag[2]))
-				}
-
-				continue
-			}
-
-			times := timeRegex.FindAllStringSubmatchIndex(line, -1)
-			if len(times) > 1 {
-				repeated = true
-			}
-
-			// The second condition is for when there is a timestamp in the middle of
-			// a line (after any text)
-			if len(times) == 0 || times[0][0] != 0 {
-				if validLine {
-					priorLine += "\n" + line
-				}
-				continue
-			}
-
-			if validLine {
-				value, baseCues := parseEnhancedLine(priorLine)
-				for idx := range timestamps {
-					startCopy := timestamps[idx]
-					structuredLines = append(structuredLines, Line{
-						Start: &startCopy,
-						Value: value,
-						Cue:   shiftELRCCues(baseCues, timestamps[idx]-timestamps[0]),
-					})
-				}
-				timestamps = nil
-			}
-
-			end := 0
-
-			// [fullStart, fullEnd, hourStart, hourEnd, minStart, minEnd, secStart, secEnd, msStart, msEnd]
-			for _, match := range times {
-				// for multiple matches, we need to check that later matches are not
-				// in the middle of the string
-				if end != 0 {
-					middle := strings.TrimSpace(line[end:match[0]])
-					if middle != "" {
-						break
-					}
-				}
-
-				end = match[1]
-				timeInMillis, err := parseTime(line, match)
-				if err != nil {
-					return nil, err
-				}
-
-				timestamps = append(timestamps, timeInMillis)
-			}
-
-			if end >= len(line) {
-				priorLine = ""
-			} else {
-				priorLine = strings.TrimSpace(line[end:])
-			}
-
-			validLine = true
-		} else {
-			text = line
-			structuredLines = append(structuredLines, Line{
-				Start: time,
-				Value: text,
-			})
+		idTag := lrcIdRegex.FindStringSubmatch(line)
+		if idTag != nil {
+			artist, title, language, offset = applyLRCIDTag(idTag, artist, title, language, offset)
+			continue
 		}
+
+		times := timeRegex.FindAllStringSubmatchIndex(line, -1)
+		if len(times) > 1 {
+			repeated = true
+		}
+
+		// The second condition is for when there is a timestamp in the middle of
+		// a line (after any text)
+		if len(times) == 0 || times[0][0] != 0 {
+			if validLine {
+				priorLine += "\n" + line
+			}
+			continue
+		}
+
+		if validLine {
+			value, baseCues := parseEnhancedLine(priorLine)
+			for idx := range timestamps {
+				startCopy := timestamps[idx]
+				structuredLines = append(structuredLines, Line{
+					Start: &startCopy,
+					Value: value,
+					Cue:   shiftELRCCues(baseCues, timestamps[idx]-timestamps[0]),
+				})
+			}
+			timestamps = nil
+		}
+
+		end := 0
+
+		// [fullStart, fullEnd, hourStart, hourEnd, minStart, minEnd, secStart, secEnd, msStart, msEnd]
+		for _, match := range times {
+			// for multiple matches, we need to check that later matches are not
+			// in the middle of the string
+			if end != 0 {
+				middle := strings.TrimSpace(line[end:match[0]])
+				if middle != "" {
+					break
+				}
+			}
+
+			end = match[1]
+			timeInMillis, err := parseTime(line, match)
+			if err != nil {
+				return nil, err
+			}
+
+			timestamps = append(timestamps, timeInMillis)
+		}
+
+		if end >= len(line) {
+			priorLine = ""
+		} else {
+			priorLine = strings.TrimSpace(line[end:])
+		}
+
+		validLine = true
 	}
 
 	if validLine {
@@ -162,15 +138,60 @@ func parseLRC(language, text string) (*Lyrics, error) {
 		})
 	}
 
+	format := LyricFormatLRC
+	for i := range structuredLines {
+		if structuredLines[i].Start != nil && structuredLines[i].Value == "" {
+			structuredLines[i].Instrumental = true
+		}
+		if len(structuredLines[i].Cue) > 0 {
+			format = LyricFormatELRC
+		}
+	}
+
 	lyrics := Lyrics{
 		DisplayArtist: artist,
 		DisplayTitle:  title,
+		Format:        format,
 		Lang:          language,
 		Line:          normalizeCueLines(structuredLines),
 		Offset:        offset,
 		Synced:        synced,
 	}
 	return &lyrics, nil
+}
+
+func parsePlainLRCLines(language string, lines []string) *Lyrics {
+	structuredLines := make([]Line, 0, len(lines))
+	for _, rawLine := range lines {
+		structuredLines = append(structuredLines, Line{Value: strings.TrimSpace(rawLine)})
+	}
+	for len(structuredLines) > 0 && structuredLines[0].Value == "" {
+		structuredLines = structuredLines[1:]
+	}
+	for len(structuredLines) > 0 && structuredLines[len(structuredLines)-1].Value == "" {
+		structuredLines = structuredLines[:len(structuredLines)-1]
+	}
+	return &Lyrics{Format: LyricFormatPlain, Lang: language, Line: structuredLines}
+}
+
+func applyLRCIDTag(idTag []string, artist, title, language string, offset *int64) (string, string, string, *int64) {
+	value := strings.TrimSpace(idTag[2])
+	switch idTag[1] {
+	case "ar":
+		artist = str.SanitizeText(value)
+	case "lang":
+		language = str.SanitizeText(value)
+	case "offset":
+		off, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			log.Warn("Error parsing offset", "offset", idTag[2], "error", err)
+		} else {
+			offset = &off
+		}
+	case "ti":
+		title = str.SanitizeText(value)
+	}
+	return artist, title, language, offset
 }
 
 // parseEnhancedLine extracts word-level timing cues from Enhanced LRC inline markers
@@ -259,6 +280,7 @@ func parseEnhancedLine(text string) (string, []Cue) {
 			Value:     finalRaw[byteStart:byteEnd],
 			ByteStart: byteStart - leftTrimBytes,
 			ByteEnd:   byteEnd - leftTrimBytes - 1,
+			Precision: LyricPrecisionSegment,
 		})
 	}
 
