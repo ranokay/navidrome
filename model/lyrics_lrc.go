@@ -162,14 +162,14 @@ func parseLRC(language, text string) (*Lyrics, error) {
 		})
 	}
 
-	lyrics := Lyrics{
+	lyrics := NormalizeLyrics(Lyrics{
 		DisplayArtist: artist,
 		DisplayTitle:  title,
 		Lang:          language,
-		Line:          normalizeCueLines(structuredLines),
+		Line:          structuredLines,
 		Offset:        offset,
 		Synced:        synced,
-	}
+	})
 	return &lyrics, nil
 }
 
@@ -189,6 +189,9 @@ func parseEnhancedLine(text string) (string, []Cue) {
 
 	segments := make([]segment, 0, len(matches))
 	var rawValue strings.Builder
+	// Enhanced LRC permits text before the first inline timestamp. It is part of
+	// the visible line even though it has no word-level timing of its own.
+	rawValue.WriteString(text[:matches[0][0]])
 	var trailingEnd *int64
 	for i, match := range matches {
 		timeMs, err := parseTime(
