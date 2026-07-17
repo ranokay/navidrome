@@ -2,6 +2,7 @@ package subsonic
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 
 	"github.com/navidrome/navidrome/conf"
@@ -61,6 +62,12 @@ var _ = Describe("GetLyricsBySongId", func() {
 					Expect(realLine.Start).To(BeNil())
 				} else {
 					Expect(*realLine.Start).To(Equal(*expectedLine.Start))
+				}
+				if expectedLine.End == nil {
+					Expect(realLine.End).To(BeNil())
+				} else {
+					Expect(realLine.End).ToNot(BeNil())
+					Expect(*realLine.End).To(Equal(*expectedLine.End))
 				}
 			}
 
@@ -276,7 +283,9 @@ var _ = Describe("GetLyricsBySongId", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		mainStartA := int64(1000)
+		mainEndA := int64(1500)
 		mainStartB := int64(2000)
+		mainEndB := int64(2700)
 		tokenStartA := int64(2000)
 		tokenEndA := int64(2300)
 		tokenStartB := int64(2300)
@@ -292,10 +301,12 @@ var _ = Describe("GetLyricsBySongId", func() {
 					Line: []responses.Line{
 						{
 							Start: &mainStartA,
+							End:   &mainEndA,
 							Value: "こんにちは",
 						},
 						{
 							Start: &mainStartB,
+							End:   &mainEndB,
 							Value: "こんばんは",
 						},
 					},
@@ -309,6 +320,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 					Line: []responses.Line{
 						{
 							Start: &mainStartA,
+							End:   &mainEndA,
 							Value: "Hola",
 						},
 					},
@@ -322,6 +334,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 					Line: []responses.Line{
 						{
 							Start: &mainStartB,
+							End:   &tokenEndB,
 							Value: "konni",
 						},
 					},
@@ -423,6 +436,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 					Line: []responses.Line{
 						{
 							Start: &lineStart,
+							End:   &lineEnd,
 							Value: "Hello echo",
 						},
 					},
@@ -623,6 +637,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 					Line: []responses.Line{
 						{
 							Start: &lineStart,
+							End:   &lineEnd,
 							Value: "real slow (When you slide)",
 						},
 					},
@@ -722,6 +737,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 					Line: []responses.Line{
 						{
 							Start: &lineStart,
+							End:   &lineEnd,
 							Value: "Line without word timing",
 						},
 					},
@@ -806,8 +822,8 @@ var _ = Describe("GetLyricsBySongId", func() {
 					Lang:          "eng",
 					Synced:        true,
 					Line: []responses.Line{
-						{Start: &asciiLineStart, Value: "Oh love love me tonight"},
-						{Start: &utfLineStart, Value: "눈을 뜬 순간"},
+						{Start: &asciiLineStart, End: &asciiLineEnd, Value: "Oh love love me tonight"},
+						{Start: &utfLineStart, End: &utfLineEnd, Value: "눈을 뜬 순간"},
 					},
 					CueLine: []responses.CueLine{
 						{
@@ -838,5 +854,52 @@ var _ = Describe("GetLyricsBySongId", func() {
 				},
 			},
 		})
+	})
+
+	It("should expose only valid explicit line ends in default and enhanced responses", func() {
+		startA := int64(1000)
+		endA := int64(2000)
+		startB := int64(3000)
+		endB := int64(4500)
+		startC := int64(4000)
+		instant := int64(5000)
+		reversedEnd := int64(5500)
+		reversedStart := int64(6000)
+		endWithoutStart := int64(7000)
+
+		lyrics := model.Lyrics{
+			Lang:   "eng",
+			Synced: true,
+			Line: []model.Line{
+				{Start: &startA, End: &endA, Value: "explicit final end"},
+				{Start: &startB, End: &endB, Value: "gap before this line"},
+				{Start: &startC, Value: "overlap with an unknown end"},
+				{Start: &instant, End: &instant, Value: "instant marker"},
+				{Start: &reversedStart, End: &reversedEnd, Value: "invalid historical end"},
+				{End: &endWithoutStart, Value: "end without start"},
+			},
+		}
+
+		for _, enhanced := range []bool{false, true} {
+			By("serializing with enhanced=" + fmt.Sprint(enhanced))
+			actual := buildStructuredLyric(&model.MediaFile{}, lyrics, enhanced)
+			Expect(actual.Line).To(HaveLen(6))
+			Expect(actual.Line[0].End).ToNot(BeNil())
+			Expect(*actual.Line[0].End).To(Equal(endA))
+			Expect(actual.Line[1].End).ToNot(BeNil())
+			Expect(*actual.Line[1].End).To(Equal(endB))
+			Expect(actual.Line[2].End).To(BeNil())
+			Expect(actual.Line[3].End).ToNot(BeNil())
+			Expect(*actual.Line[3].End).To(Equal(instant))
+			Expect(actual.Line[4].End).To(BeNil())
+			Expect(actual.Line[5].Start).To(BeNil())
+			Expect(actual.Line[5].End).To(BeNil())
+		}
+
+		lyrics.Synced = false
+		actual := buildStructuredLyric(&model.MediaFile{}, lyrics, true)
+		for _, line := range actual.Line {
+			Expect(line.End).To(BeNil())
+		}
 	})
 })
