@@ -34,17 +34,11 @@ const MobileKaraokeLyricsPortal = ({ active, children }) => {
       return undefined
     }
 
-    const currentHost = resolveMobileLyricsHost()
-    if (currentHost) {
-      setHost(currentHost)
-      return undefined
-    }
+    setHost(resolveMobileLyricsHost())
 
     const observer = new MutationObserver(() => {
       const nextHost = resolveMobileLyricsHost()
-      if (!nextHost) return
-      setHost(nextHost)
-      observer.disconnect()
+      setHost((current) => (current === nextHost ? current : nextHost))
     })
     observer.observe(document.body, { childList: true, subtree: true })
 

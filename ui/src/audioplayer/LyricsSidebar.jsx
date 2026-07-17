@@ -186,6 +186,7 @@ const LyricsSidebar = ({
   audioInstance,
   loading = false,
   error = null,
+  labels = {},
 }) => {
   const [width, setWidth] = useState(loadSidebarWidth)
   const sidebarRef = useRef(null)
@@ -340,7 +341,7 @@ const LyricsSidebar = ({
         opacity: entered ? 1 : 0,
         pointerEvents: entered ? 'auto' : 'none',
       }}
-      aria-label="Lyrics"
+      aria-label={labels.title || 'Lyrics'}
       aria-hidden={!entered}
       data-resizing={isResizing ? 'true' : 'false'}
     >
@@ -348,7 +349,7 @@ const LyricsSidebar = ({
         type="button"
         className={classes.resizer}
         data-testid="lyrics-sidebar-resizer"
-        aria-label="Resize lyrics sidebar"
+        aria-label={labels.resize || 'Resize lyrics sidebar'}
         aria-orientation="vertical"
         aria-valuemin={LYRICS_SIDEBAR_MIN_WIDTH}
         aria-valuemax={LYRICS_SIDEBAR_MAX_WIDTH}
@@ -367,7 +368,9 @@ const LyricsSidebar = ({
             classes={classes}
             disabled={!pronunciationEnabled}
             label={
-              showPronunciation ? 'Hide pronunciation' : 'Show pronunciation'
+              showPronunciation
+                ? labels.hidePronunciation || 'Hide pronunciation'
+                : labels.showPronunciation || 'Show pronunciation'
             }
             onClick={onTogglePronunciation}
             testId="toggle-pronunciation-button"
@@ -378,7 +381,11 @@ const LyricsSidebar = ({
             active={showTranslation}
             classes={classes}
             disabled={!translationEnabled}
-            label={showTranslation ? 'Hide translation' : 'Show translation'}
+            label={
+              showTranslation
+                ? labels.hideTranslation || 'Hide translation'
+                : labels.showTranslation || 'Show translation'
+            }
             onClick={onToggleTranslation}
             testId="toggle-translation-button"
           >
@@ -395,6 +402,7 @@ const LyricsSidebar = ({
           audioInstance={audioInstance}
           loading={loading}
           error={error}
+          labels={labels}
         />
       </div>
     </aside>

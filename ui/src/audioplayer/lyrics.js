@@ -212,15 +212,6 @@ const pickLyricByLanguage = (lyrics, preferredLanguage) => {
   )
 }
 
-const lineTimeWindow = (lines, index) => {
-  const line = lines[index]
-  if (!line) return { start: null, end: null }
-
-  const start = toTime(line.start)
-  const end = toTime(line.end) ?? toTime(lines[index + 1]?.start)
-  return { start, end }
-}
-
 export const hasCueTiming = (structuredLyric) =>
   Boolean(
     structuredLyric &&
@@ -243,9 +234,13 @@ export const hasStructuredLyricContent = (structuredLyric) =>
   )
 
 export const getPreferredLyricLanguage = () => {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    const stored = window.localStorage.getItem('locale')
-    if (stored) return stored
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const stored = window.localStorage.getItem('locale')
+      if (stored) return stored
+    }
+  } catch {
+    // Fall back to the browser language when storage access is restricted.
   }
   if (typeof navigator !== 'undefined' && navigator.language) {
     return navigator.language
@@ -483,97 +478,6 @@ export const buildKaraokeLines = (structuredLyric) => {
     .sort((a, b) => a.index - b.index)
 }
 
-export const resolveKaraokeTokenWindow = (
-  line,
-  tokenIndex,
-  lineEndFallback = null,
-) => {
-  const tokens = Array.isArray(line?.tokens) ? line.tokens : []
-  const token = tokens[tokenIndex]
-  if (!token) return { start: null, end: null }
-
-  const prevToken = tokenIndex > 0 ? tokens[tokenIndex - 1] : null
-  const nextToken =
-    tokenIndex + 1 < tokens.length ? tokens[tokenIndex + 1] : null
-
-  const lineStart = toTime(line?.start)
-  const lineEnd = toTime(line?.end) ?? toTime(lineEndFallback)
-  const tokenCount = tokens.length
-  const hasLineWindow =
-    lineStart != null &&
-    lineEnd != null &&
-    Number.isFinite(lineStart) &&
-    Number.isFinite(lineEnd) &&
-    lineEnd > lineStart
-  const estimatedStart =
-    hasLineWindow && tokenCount > 0
-      ? lineStart + ((lineEnd - lineStart) * tokenIndex) / tokenCount
-      : null
-  const estimatedEnd =
-    hasLineWindow && tokenCount > 0
-      ? lineStart + ((lineEnd - lineStart) * (tokenIndex + 1)) / tokenCount
-      : null
-
-  let explicitStartCount = 0
-  let explicitEndCount = 0
-  const uniqueStarts = new Set()
-  const uniqueEnds = new Set()
-
-  for (let i = 0; i < tokenCount; i += 1) {
-    const explicitStart = toTime(tokens[i]?.start)
-    if (explicitStart != null) {
-      explicitStartCount += 1
-      uniqueStarts.add(explicitStart)
-    }
-
-    const explicitEnd = toTime(tokens[i]?.end)
-    if (explicitEnd != null) {
-      explicitEndCount += 1
-      uniqueEnds.add(explicitEnd)
-    }
-  }
-
-  const collapsedStarts =
-    explicitStartCount > 1 && uniqueStarts.size <= Math.max(1, tokenCount / 4)
-  const collapsedEnds =
-    explicitEndCount > 1 && uniqueEnds.size <= Math.max(1, tokenCount / 4)
-  const shouldForceEstimated =
-    hasLineWindow && tokenCount > 1 && (collapsedStarts || collapsedEnds)
-
-  if (shouldForceEstimated) {
-    return { start: estimatedStart, end: estimatedEnd }
-  }
-
-  const prevEnd = toTime(prevToken?.end) ?? toTime(prevToken?.start)
-  let start = toTime(token.start)
-  if (start == null) start = prevEnd ?? estimatedStart ?? lineStart
-
-  let end = toTime(token.end)
-  if (end == null) {
-    const nextDirectStart = toTime(nextToken?.start)
-    const nextEstimatedStart =
-      hasLineWindow && tokenIndex + 1 < tokenCount
-        ? lineStart + ((lineEnd - lineStart) * (tokenIndex + 1)) / tokenCount
-        : null
-    end = nextDirectStart ?? nextEstimatedStart ?? estimatedEnd ?? lineEnd
-  }
-
-  if (
-    tokenCount === 1 &&
-    hasLineWindow &&
-    (start == null || end == null || end <= start + 1)
-  ) {
-    start = lineStart
-    end = lineEnd
-  }
-
-  if (start != null && end != null && end < start) {
-    end = start
-  }
-
-  return { start, end }
-}
-
 export const hasUsableKaraokeTiming = (lines) =>
   Array.isArray(lines) &&
   lines.some(
@@ -586,66 +490,3 @@ export const hasUsableKaraokeTiming = (lines) =>
               toTime(token?.start) != null || toTime(token?.end) != null,
           ))),
   )
-
-export const findLayerLineIndexForMain = (mainLines, layerLines, mainIndex) => {
-  if (
-    !Array.isArray(mainLines) ||
-    !Array.isArray(layerLines) ||
-    mainLines.length === 0 ||
-    layerLines.length === 0 ||
-    mainIndex < 0 ||
-    mainIndex >= mainLines.length
-  ) {
-    return -1
-  }
-
-  const { start: mainStart, end: mainEnd } = lineTimeWindow(
-    mainLines,
-    mainIndex,
-  )
-
-  if (mainStart == null) return -1
-  const mainWindowEnd = mainEnd ?? mainStart
-  const mainWindowDuration = Math.max(0, mainWindowEnd - mainStart)
-  const maxDelta = Math.max(550, Math.min(1400, mainWindowDuration + 420))
-
-  let bestIdx = -1
-  let bestScore = Number.POSITIVE_INFINITY
-
-  for (let i = 0; i < layerLines.length; i += 1) {
-    const { start, end } = lineTimeWindow(layerLines, i)
-
-    if (start != null && end != null) {
-      const overlap = Math.min(end, mainEnd ?? end) - Math.max(start, mainStart)
-      if (overlap >= 0) {
-        const score = Math.abs(start - mainStart) + Math.abs(i - mainIndex) * 30
-        if (score < bestScore) {
-          bestScore = score
-          bestIdx = i
-        }
-        continue
-      }
-    }
-
-    if (start != null) {
-      if (Math.abs(start - mainStart) > maxDelta) continue
-      const score = Math.abs(start - mainStart) + Math.abs(i - mainIndex) * 45
-      if (score < bestScore) {
-        bestScore = score
-        bestIdx = i
-      }
-    }
-  }
-
-  return bestIdx
-}
-
-export const resolveLayerLineForMain = (mainLines, layerLines, mainIndex) => {
-  const index = findLayerLineIndexForMain(mainLines, layerLines, mainIndex)
-  return { index, line: index >= 0 ? layerLines[index] : null }
-}
-
-export const buildHighlightedMainLine = (line) => line
-
-export const buildHighlightedAuxLine = (_referenceLine, auxiliaryLine) =>
-  auxiliaryLine ?? null

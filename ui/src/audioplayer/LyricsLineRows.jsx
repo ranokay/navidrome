@@ -16,6 +16,12 @@ import {
 import { resolveKaraokeTokenWindows } from './lyricsTimeline'
 
 const EMPHASIS_TONE = 0.7
+const EMPHASIS_PAINT_OVERHANG = '0.18em'
+
+const emphasisPaintOverhangStyle = {
+  marginInlineEnd: `-${EMPHASIS_PAINT_OVERHANG}`,
+  paddingInlineEnd: EMPHASIS_PAINT_OVERHANG,
+}
 
 const graphemeSegmenter =
   typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
@@ -29,21 +35,56 @@ const splitGraphemes = (value) => {
     : Array.from(text)
 }
 
-const renderWaveText = (text, enabled, className) => {
-  if (!enabled) return text
-  return splitGraphemes(text).map((character, index) => {
-    if (/^\s+$/.test(character)) return character
-    return (
-      <span
-        key={`${index}-${character}`}
-        aria-hidden="true"
-        className={className}
-        data-lyrics-character="true"
-      >
-        {character}
-      </span>
-    )
-  })
+const waveTextRootStyle = {
+  display: 'inline-block',
+  position: 'relative',
+  verticalAlign: 'baseline',
+}
+
+const waveTextMeasureStyle = { visibility: 'hidden' }
+
+const waveTextOverlayStyle = {
+  display: 'block',
+  inset: 0,
+  position: 'absolute',
+  whiteSpace: 'nowrap',
+}
+
+const renderWaveText = (text, eligible, enabled, emphasized, className) => {
+  if (!eligible) return text
+
+  return (
+    <span
+      aria-hidden="true"
+      data-lyrics-wave-text="true"
+      style={waveTextRootStyle}
+    >
+      {enabled ? (
+        <>
+          <span data-lyrics-wave-measure="true" style={waveTextMeasureStyle}>
+            {text}
+          </span>
+          <span data-lyrics-wave-overlay="true" style={waveTextOverlayStyle}>
+            {splitGraphemes(text).map((character, index) => {
+              if (/^\s+$/.test(character)) return character
+              return (
+                <span
+                  key={`${index}-${character}`}
+                  className={className}
+                  data-lyrics-character="true"
+                  style={emphasized ? emphasisPaintOverhangStyle : undefined}
+                >
+                  {character}
+                </span>
+              )
+            })}
+          </span>
+        </>
+      ) : (
+        text
+      )}
+    </span>
+  )
 }
 
 const tokenColor = (rgb, alpha) => {
@@ -84,10 +125,10 @@ const buildStaticEmphasisStyle = (token) => {
   }
 }
 
-const buildTokenData = (token, rgb) => {
+const buildTokenData = (token, rgb, line) => {
+  const emphasized = isEmphasisRole(token) || isEmphasisRole(line)
   const tonedRGB = getTokenRGB(token, rgb)
   const futureColor = tokenColor(tonedRGB, TOKEN_FUTURE_ALPHA)
-  const doneColor = tokenColor(tonedRGB, TOKEN_ACTIVE_ALPHA)
   const gradientDoneColor = tokenColor(
     tonedRGB,
     'var(--lyrics-token-active-alpha, 1)',
@@ -113,13 +154,11 @@ const buildTokenData = (token, rgb) => {
       backgroundClip: 'text',
       WebkitBackgroundClip: 'text',
       ...buildEmphasisStyle(token),
+      ...(emphasized ? emphasisPaintOverhangStyle : {}),
     },
     presentation: {
-      rgb: tonedRGB,
       futureAlpha: TOKEN_FUTURE_ALPHA,
       activeAlpha: TOKEN_ACTIVE_ALPHA,
-      futureColor,
-      doneColor,
       gradient,
     },
   }
@@ -141,6 +180,7 @@ export const KaraokeLineRow = memo(
     tokenClassName,
     waveCharacterClassName,
     registerToken,
+    renderCharacterWave = true,
     rowKey = 'main',
     testId,
   }) => {
@@ -175,7 +215,9 @@ export const KaraokeLineRow = memo(
 
           const window = windows[segment.tokenIndex]
           const key = `${lineIndex}:${rowKey}:${segment.tokenIndex}:main`
-          const tokenData = buildTokenData(segment.token, tokenRGB)
+          const emphasized =
+            isEmphasisRole(segment.token) || isEmphasisRole(line)
+          const tokenData = buildTokenData(segment.token, tokenRGB, line)
           return (
             <span
               key={`token-${idx}-${window?.start ?? 'na'}`}
@@ -195,6 +237,12 @@ export const KaraokeLineRow = memo(
               {renderWaveText(
                 segment.text,
                 Boolean(window?.start != null && window?.end != null),
+                Boolean(
+                  renderCharacterWave &&
+                  window?.start != null &&
+                  window?.end != null,
+                ),
+                emphasized,
                 waveCharacterClassName,
               )}
             </span>
@@ -203,17 +251,6 @@ export const KaraokeLineRow = memo(
       </Typography>
     )
   },
-  (prevProps, nextProps) =>
-    prevProps.lineIndex === nextProps.lineIndex &&
-    prevProps.line === nextProps.line &&
-    prevProps.nextLineStart === nextProps.nextLineStart &&
-    prevProps.className === nextProps.className &&
-    prevProps.style === nextProps.style &&
-    prevProps.tokenClassName === nextProps.tokenClassName &&
-    prevProps.waveCharacterClassName === nextProps.waveCharacterClassName &&
-    prevProps.registerToken === nextProps.registerToken &&
-    prevProps.rowKey === nextProps.rowKey &&
-    prevProps.testId === nextProps.testId,
 )
 
 KaraokeLineRow.displayName = 'KaraokeLineRow'
@@ -344,6 +381,7 @@ export const KaraokeStackedLineRow = memo(
     waveCharacterClassName,
     classes,
     registerToken,
+    renderCharacterWave = true,
     rowKey = 'main',
     testId,
   }) => {
@@ -421,8 +459,10 @@ export const KaraokeStackedLineRow = memo(
             : null
           const mainKey = `${lineIndex}:${rowKey}:${segment.tokenIndex}:main`
           const mainTokenData = segment.token
-            ? buildTokenData(segment.token, tokenRGB)
+            ? buildTokenData(segment.token, tokenRGB, line)
             : null
+          const mainEmphasized =
+            isEmphasisRole(segment.token) || isEmphasisRole(line)
           const mainText = segment.token ? (
             <span
               key={`main-${idx}`}
@@ -442,13 +482,19 @@ export const KaraokeStackedLineRow = memo(
               {renderWaveText(
                 segment.text,
                 Boolean(mainWindow?.start != null && mainWindow?.end != null),
+                Boolean(
+                  renderCharacterWave &&
+                  mainWindow?.start != null &&
+                  mainWindow?.end != null,
+                ),
+                mainEmphasized,
                 waveCharacterClassName,
               )}
             </span>
           ) : (
             <span
               key={`main-${idx}`}
-              className={classes.stackedMainText}
+              className={classes.stackedSpacer}
               style={buildStaticEmphasisStyle(segment.token)}
             >
               {segment.text}
@@ -458,16 +504,25 @@ export const KaraokeStackedLineRow = memo(
           if (!segment.pronunciation) return mainText
 
           const pronunciationToken = segment.pronunciationSegment?.token
-          const pronunciationWindow = pronunciationToken
-            ? pronunciationWindows[segment.pronunciationSegment.tokenIndex]
-            : mainWindow
+          const pronunciationWindow =
+            mainWindow ||
+            (pronunciationToken
+              ? pronunciationWindows[segment.pronunciationSegment.tokenIndex]
+              : null)
           const pronunciationKey = `${lineIndex}:${rowKey}:${segment.tokenIndex}:pronunciation`
           const pronunciationTokenData = pronunciationWindow
             ? buildTokenData(
                 pronunciationToken || segment.token,
                 pronunciationRGB,
+                pronunciationLine || line,
               )
             : null
+          const pronunciationEmphasized = Boolean(
+            isEmphasisRole(pronunciationToken) ||
+            isEmphasisRole(segment.token) ||
+            isEmphasisRole(pronunciationLine) ||
+            isEmphasisRole(line),
+          )
           return (
             <span
               key={`stacked-${idx}-${mainWindow?.start ?? segment.text}`}
@@ -506,6 +561,8 @@ export const KaraokeStackedLineRow = memo(
                 {renderWaveText(
                   segment.pronunciation,
                   Boolean(pronunciationWindow),
+                  Boolean(renderCharacterWave && pronunciationWindow),
+                  pronunciationEmphasized,
                   waveCharacterClassName,
                 )}
               </span>
@@ -515,20 +572,6 @@ export const KaraokeStackedLineRow = memo(
       </Typography>
     )
   },
-  (prevProps, nextProps) =>
-    prevProps.lineIndex === nextProps.lineIndex &&
-    prevProps.line === nextProps.line &&
-    prevProps.pronunciationLine === nextProps.pronunciationLine &&
-    prevProps.pronunciationStyle === nextProps.pronunciationStyle &&
-    prevProps.nextLineStart === nextProps.nextLineStart &&
-    prevProps.className === nextProps.className &&
-    prevProps.style === nextProps.style &&
-    prevProps.tokenClassName === nextProps.tokenClassName &&
-    prevProps.waveCharacterClassName === nextProps.waveCharacterClassName &&
-    prevProps.classes === nextProps.classes &&
-    prevProps.registerToken === nextProps.registerToken &&
-    prevProps.rowKey === nextProps.rowKey &&
-    prevProps.testId === nextProps.testId,
 )
 
 KaraokeStackedLineRow.displayName = 'KaraokeStackedLineRow'

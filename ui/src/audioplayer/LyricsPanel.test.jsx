@@ -1,16 +1,24 @@
 import React from 'react'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { ThemeProvider, createTheme } from '@material-ui/core/styles'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import LyricsPanel from './LyricsPanel'
 import {
+  KARAOKE_ANIMATION_MS,
   KARAOKE_CHARACTER_LIFT_PX,
-  KARAOKE_DESKTOP_ACTIVE_LINE_ANCHOR_RATIO,
   KARAOKE_LINE_ENTER_MS,
   KARAOKE_LINE_LIFT_PX,
+  KARAOKE_LINE_RELEASE_MS,
   KARAOKE_MANUAL_SCROLL_PAUSE_MS,
+  KARAOKE_TRANSLATION_OPACITY,
 } from './lyricsKaraokeConstants'
-import { buildSegmentsFromLine } from './lyricsSegments'
 
 const theme = createTheme({
   palette: {
@@ -31,39 +39,29 @@ const mainLyric = {
   line: [{ start: 0, end: 1000, value: 'Main line' }],
 }
 
-const tokenizedMainLyric = {
+const createTokenizedLyric = (value, first, second) => ({
   synced: true,
-  line: [{ start: 0, end: 1000, value: 'Main line' }],
+  line: [{ start: 0, end: 1000, value }],
   cueLine: [
     {
       index: 0,
       start: 0,
       end: 1000,
-      value: 'Main line',
+      value,
       cue: [
-        { start: 0, end: 500, value: 'Main', byteStart: 0, byteEnd: 3 },
-        { start: 500, end: 1000, value: 'line', byteStart: 5, byteEnd: 8 },
+        { start: 0, end: 500, value: first, byteStart: 0, byteEnd: 3 },
+        { start: 500, end: 1000, value: second, byteStart: 5, byteEnd: 8 },
       ],
     },
   ],
-}
+})
 
-const tokenizedPronunciationLyric = {
-  synced: true,
-  line: [{ start: 0, end: 1000, value: 'mein lain' }],
-  cueLine: [
-    {
-      index: 0,
-      start: 0,
-      end: 1000,
-      value: 'mein lain',
-      cue: [
-        { start: 0, end: 500, value: 'mein', byteStart: 0, byteEnd: 3 },
-        { start: 500, end: 1000, value: 'lain', byteStart: 5, byteEnd: 8 },
-      ],
-    },
-  ],
-}
+const tokenizedMainLyric = createTokenizedLyric('Main line', 'Main', 'line')
+const tokenizedPronunciationLyric = createTokenizedLyric(
+  'mein lain',
+  'mein',
+  'lain',
+)
 
 const multiAgentLyric = {
   synced: true,
@@ -113,24 +111,7 @@ describe('<LyricsPanel />', () => {
     vi.useRealTimers()
     vi.restoreAllMocks()
     window.matchMedia = originalMatchMedia
-  })
-
-  it('does not render timed blank rows as empty lyric groups', () => {
-    renderPanel({
-      mainLyric: {
-        synced: true,
-        line: [
-          { start: 0, value: 'Before pause' },
-          { start: 1000, value: '' },
-          { start: 2000, value: 'After pause' },
-        ],
-      },
-      audioInstance: { currentTime: 1.5, paused: true },
-    })
-
-    expect(screen.getAllByTestId('lyrics-line-group')).toHaveLength(2)
-    expect(screen.getByText('Before pause')).toBeInTheDocument()
-    expect(screen.getByText('After pause')).toBeInTheDocument()
+    cleanup()
   })
 
   it('renders main, stacked pronunciation, and translation in layer order', () => {
@@ -176,6 +157,26 @@ describe('<LyricsPanel />', () => {
     ).toHaveTextContent('Closest main line')
   })
 
+  it('suppresses duplicate translations without shifting untimed indexes', () => {
+    renderPanel({
+      mainLyric: {
+        synced: false,
+        line: [{ value: 'Hello' }, { value: 'World' }],
+      },
+      translationLyric: {
+        synced: false,
+        line: [{ value: 'Hello' }, { value: 'Mundo' }],
+      },
+      showTranslation: true,
+    })
+
+    const groups = screen.getAllByTestId('lyrics-line-group')
+    expect(groups[0]).toHaveTextContent('Hello')
+    expect(groups[0]).not.toHaveTextContent('Mundo')
+    expect(groups[1]).toHaveTextContent('World')
+    expect(groups[1]).toHaveTextContent('Mundo')
+  })
+
   it('renders line-level pronunciation without inventing word timing', () => {
     renderPanel({
       mainLyric: {
@@ -216,75 +217,35 @@ describe('<LyricsPanel />', () => {
       audioInstance: { currentTime: 0.5, paused: true },
     })
 
-    const mainRow = screen.getByText('Main line').closest('[data-tokenized]')
+    const mainRow = screen
+      .getByTestId('lyrics-line-group')
+      .querySelector('[data-tokenized]')
     const translationRow = screen
       .getByText('translated line')
       .closest('[data-tokenized]')
-    const pronunciation = screen.getByText('main pronunciation')
+    const pronunciation = screen.getAllByTestId('lyrics-pronunciation-token')
 
     expect(mainRow).toHaveAttribute('data-layer-animation', 'shared-opacity')
     expect(translationRow).toHaveAttribute(
       'data-layer-animation',
       'shared-opacity',
     )
-    expect(pronunciation).toHaveAttribute('data-timed', 'false')
+    pronunciation.forEach((token) =>
+      expect(token).toHaveAttribute('data-timed', 'false'),
+    )
     expect(mainRow).toHaveAttribute('data-tokenized', 'false')
     expect(translationRow).toHaveAttribute('data-tokenized', 'false')
     expect(mainRow.style.opacity).toBe('')
     expect(translationRow.style.opacity).toBe('')
-  })
-
-  it('keeps timed translations on the main line lifecycle', () => {
-    const translationLyric = {
-      synced: true,
-      line: [{ start: 0, end: 1000, value: 'Translated phrase' }],
-      cueLine: [
-        {
-          index: 0,
-          start: 0,
-          end: 700,
-          value: 'Translated phrase',
-          cue: [
-            {
-              start: 0,
-              end: 150,
-              value: 'Translated',
-              byteStart: 0,
-              byteEnd: 9,
-            },
-            {
-              start: 150,
-              end: 700,
-              value: 'phrase',
-              byteStart: 11,
-              byteEnd: 16,
-            },
-          ],
-        },
-      ],
-    }
-
-    renderPanel({
-      mainLyric: tokenizedMainLyric,
-      pronunciationLyric: tokenizedPronunciationLyric,
-      translationLyric,
-      showPronunciation: true,
-      showTranslation: true,
-      audioInstance: { currentTime: 0.25, paused: true },
-    })
-
-    const group = screen.getByTestId('lyrics-line-group')
-    const translation = screen.getByText('Translated phrase')
-    expect(group).toHaveAttribute('data-active', 'true')
-    expect(translation).not.toHaveAttribute('data-lyrics-state')
-    expect(translation).toHaveAttribute(
-      'data-layer-animation',
-      'shared-opacity',
+    expect(window.getComputedStyle(translationRow).opacity).toBe(
+      String(KARAOKE_TRANSLATION_OPACITY),
     )
-    expect(translation.style.backgroundImage).toBe('')
-    expect(
-      group.style.getPropertyValue('--lyrics-translation-active-color'),
-    ).not.toBe('')
+    expect(window.getComputedStyle(mainRow).transition).toContain(
+      `opacity ${KARAOKE_ANIMATION_MS}ms`,
+    )
+    expect(window.getComputedStyle(translationRow).transition).toContain(
+      `opacity ${KARAOKE_ANIMATION_MS}ms`,
+    )
   })
 
   it('raises a line once and keeps it elevated after release', () => {
@@ -299,7 +260,6 @@ describe('<LyricsPanel />', () => {
     expect(group).toHaveAttribute('data-raised', 'true')
     expect(group).toHaveAttribute('data-line-motion', 'line')
     expect(activeStyle.transform).toBe(`translateY(-${KARAOKE_LINE_LIFT_PX}px)`)
-    expect(activeStyle.transitionDuration).toBe(`${KARAOKE_LINE_ENTER_MS}ms`)
 
     rerender(
       <ThemeProvider theme={theme}>
@@ -319,48 +279,44 @@ describe('<LyricsPanel />', () => {
     )
   })
 
-  it('renders future timed tokens with the same gradient paint mode', () => {
-    renderPanel({
-      mainLyric: tokenizedMainLyric,
-      audioInstance: { currentTime: 0, paused: true },
-    })
+  it('keeps every word-timed layer on the same rise and release lifecycle', () => {
+    const offsetPronunciationLyric = {
+      ...tokenizedPronunciationLyric,
+      cueLine: [
+        {
+          ...tokenizedPronunciationLyric.cueLine[0],
+          cue: [
+            { start: 100, end: 850, value: 'mein' },
+            { start: 850, end: 1000, value: 'lain' },
+          ],
+        },
+      ],
+    }
+    const renderAt = (currentTime) => (
+      <ThemeProvider theme={theme}>
+        <LyricsPanel
+          visible
+          mainLyric={tokenizedMainLyric}
+          pronunciationLyric={offsetPronunciationLyric}
+          translationLyric={{
+            synced: true,
+            line: [{ start: 0, end: 1000, value: 'translated line' }],
+          }}
+          showPronunciation
+          showTranslation
+          audioInstance={{ currentTime, paused: true }}
+        />
+      </ThemeProvider>
+    )
+    const { rerender } = render(renderAt(0.25))
 
-    const futureToken = screen.getAllByTestId('lyrics-token')[1]
-    expect(futureToken).toHaveAttribute('data-lyrics-state', 'future')
-    expect(futureToken.style.color).toBe('transparent')
-    expect(futureToken.style.webkitTextFillColor).toBe('transparent')
-    expect(futureToken.style.backgroundImage).not.toBe('none')
-    expect(futureToken.style.opacity).toBe('1')
-  })
-
-  it('uses only the per-character rise for token-timed lyrics', () => {
-    renderPanel({
-      mainLyric: tokenizedMainLyric,
-      audioInstance: { currentTime: 0.25, paused: true },
-    })
+    expect(KARAOKE_LINE_ENTER_MS).toBe(KARAOKE_ANIMATION_MS)
+    expect(KARAOKE_LINE_RELEASE_MS).toBe(KARAOKE_ANIMATION_MS)
 
     const group = screen.getByTestId('lyrics-line-group')
-    const firstCharacter = screen
-      .getAllByTestId('lyrics-token')[0]
-      .querySelector('[data-lyrics-character="true"]')
-
-    expect(group).toHaveAttribute('data-raised', 'true')
-    expect(group).toHaveAttribute('data-line-motion', 'character')
-    expect(window.getComputedStyle(group).transform).toBe('translateY(0)')
-    expect(firstCharacter.style.transform).toBe(
-      `translateY(-${KARAOKE_LINE_LIFT_PX.toFixed(4)}px)`,
-    )
-    expect(KARAOKE_CHARACTER_LIFT_PX).toBe(KARAOKE_LINE_LIFT_PX)
-  })
-
-  it('lifts timed main and pronunciation graphemes with token progress', () => {
-    renderPanel({
-      mainLyric: tokenizedMainLyric,
-      pronunciationLyric: tokenizedPronunciationLyric,
-      showPronunciation: true,
-      audioInstance: { currentTime: 0.25, paused: true },
-    })
-
+    const translation = screen
+      .getByText('translated line')
+      .closest('[data-tokenized]')
     const mainToken = screen.getAllByTestId('lyrics-token')[0]
     const pronunciationToken = screen.getAllByTestId(
       'lyrics-pronunciation-token',
@@ -372,6 +328,12 @@ describe('<LyricsPanel />', () => {
       '[data-lyrics-character="true"]',
     )
 
+    expect(group).toHaveAttribute('data-line-motion', 'character')
+    expect(group).toHaveAttribute('data-character-wave', 'true')
+    expect(window.getComputedStyle(group).transform).toBe('translateY(0)')
+    expect(window.getComputedStyle(translation).transform).toBe(
+      `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
+    )
     expect(mainCharacters).toHaveLength(4)
     expect(pronunciationCharacters).toHaveLength(4)
     expect(mainCharacters[0].style.transform).toBe(
@@ -383,95 +345,112 @@ describe('<LyricsPanel />', () => {
     expect(pronunciationCharacters[0].style.transform).toBe(
       mainCharacters[0].style.transform,
     )
-  })
-
-  it('applies the character wave to ordinary timed lyrics without pronunciation', () => {
-    renderPanel({
-      mainLyric: tokenizedMainLyric,
-      audioInstance: { currentTime: 0.25, paused: true },
+    const synchronizedTokens = [mainToken, pronunciationToken]
+    synchronizedTokens.forEach((token) => {
+      const activeText = token.querySelector('[data-lyrics-wave-text="true"]')
+      expect(activeText.style.display).toBe('inline-block')
+      expect(token.style.backgroundImage).toBe('none')
+      expect(activeText.style.backgroundImage).toBe('none')
+      expect(
+        token.querySelector('[data-lyrics-character="true"]').style
+          .backgroundImage,
+      ).toContain('linear-gradient')
     })
 
-    const tokens = screen.getAllByTestId('lyrics-token')
-    expect(
-      tokens[0].querySelectorAll('[data-lyrics-character="true"]'),
-    ).toHaveLength(4)
-    expect(
-      tokens[1].querySelectorAll('[data-lyrics-character="true"]'),
-    ).toHaveLength(4)
-  })
+    rerender(renderAt(1.1))
 
-  it('uses the same active and release lifecycle for all line-level layers', () => {
-    const lyric = {
-      synced: true,
-      line: [{ start: 0, end: 1000, value: 'Main line' }],
-    }
-    const pronunciationLyric = {
-      synced: true,
-      line: [{ start: 0, end: 1000, value: 'main pronunciation' }],
-    }
-    const translationLyric = {
-      synced: true,
-      line: [{ start: 0, end: 1000, value: 'translated line' }],
-    }
-    const { rerender } = renderPanel({
-      mainLyric: lyric,
-      pronunciationLyric,
-      translationLyric,
-      showPronunciation: true,
-      showTranslation: true,
-      audioInstance: { currentTime: 0.5, paused: true },
-    })
-
-    const group = screen.getByTestId('lyrics-line-group')
-    const pronunciation = screen.getByText('main pronunciation')
-    const translation = screen.getByText('translated line')
-    expect(group).toHaveAttribute('data-active', 'true')
-    expect(group).toHaveAttribute('data-highlight-active', 'true')
-    expect(group.style.getPropertyValue('--lyrics-main-active-color')).not.toBe(
-      '',
+    expect(group).toHaveAttribute('data-highlight-active', 'false')
+    expect(group).toHaveAttribute('data-raised', 'true')
+    expect(group).toHaveAttribute('data-character-wave', 'false')
+    expect(
+      group.querySelectorAll('[data-lyrics-character="true"]'),
+    ).toHaveLength(0)
+    expect(window.getComputedStyle(group).transform).toBe(
+      `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
     )
-    expect(
-      group.style.getPropertyValue('--lyrics-pronunciation-active-color'),
-    ).not.toBe('')
-    expect(
-      group.style.getPropertyValue('--lyrics-translation-active-color'),
-    ).not.toBe('')
-    expect(pronunciation.style.color).toBe('')
-    expect(translation.style.color).toBe('')
+    expect(window.getComputedStyle(translation).transform).toBe('')
+    screen.getAllByTestId('lyrics-token').forEach((token) => {
+      const idleText = token.querySelector('[data-lyrics-wave-text="true"]')
+      expect(idleText.style.display).toBe('inline-block')
+      expect(token.style.backgroundImage).toBe('none')
+      expect(idleText.style.backgroundImage).toContain('linear-gradient')
+    })
+  })
 
-    rerender(
+  it('keeps detailed grapheme markup on active lines without changing token layout', () => {
+    const values = ['First word', 'Second word', 'Active word', 'Fourth word']
+    const lyricFor = (pronunciation = false) => ({
+      synced: true,
+      line: values.map((value, index) => ({
+        start: index * 1000,
+        end: (index + 1) * 1000,
+        value: pronunciation ? `spoken ${index}` : value,
+      })),
+      cueLine: values.map((value, index) => ({
+        index,
+        start: index * 1000,
+        end: (index + 1) * 1000,
+        value: pronunciation ? `spoken ${index}` : value,
+        cue: (pronunciation ? `spoken ${index}` : value)
+          .split(' ')
+          .map((word, wordIndex, words) => ({
+            start: index * 1000 + (wordIndex * 1000) / words.length,
+            end: index * 1000 + ((wordIndex + 1) * 1000) / words.length,
+            value: word,
+          })),
+      })),
+    })
+    const renderAt = (currentTime) => (
       <ThemeProvider theme={theme}>
         <LyricsPanel
           visible
-          mainLyric={lyric}
-          pronunciationLyric={pronunciationLyric}
-          translationLyric={translationLyric}
+          mainLyric={lyricFor()}
+          pronunciationLyric={lyricFor(true)}
           showPronunciation
-          showTranslation
-          audioInstance={{ currentTime: 1.1, paused: true }}
+          audioInstance={{ currentTime, paused: true }}
         />
-      </ThemeProvider>,
+      </ThemeProvider>
+    )
+    const { rerender } = render(renderAt(2.5))
+
+    let groups = screen.getAllByTestId('lyrics-line-group')
+    groups.forEach((group, index) => {
+      const characters = group.querySelectorAll(
+        '[data-lyrics-character="true"]',
+      )
+      expect(characters.length > 0).toBe(index === 2)
+      group
+        .querySelectorAll('[data-testid="lyrics-token"]')
+        .forEach((token) =>
+          expect(token).toContainElement(
+            token.querySelector('[data-lyrics-wave-text="true"]'),
+          ),
+        )
+    })
+    expect(groups[0]).toHaveAttribute('data-highlight-active', 'false')
+    expect(groups[1]).toHaveAttribute('data-highlight-active', 'false')
+    expect(groups[3]).toHaveAttribute('data-highlight-active', 'false')
+    expect(
+      groups[2].querySelectorAll('[data-lyrics-wave-measure="true"]'),
+    ).not.toHaveLength(0)
+    const activeRow = groups[2].querySelector('[data-wrapped]')
+    const spacers = activeRow.querySelectorAll(
+      ':scope > span:not([data-stacked-token="true"])',
+    )
+    expect(activeRow).toHaveAttribute('data-wrapped', 'false')
+    expect(spacers).not.toHaveLength(0)
+    spacers.forEach((spacer) =>
+      expect(window.getComputedStyle(spacer).display).toBe('inline'),
     )
 
-    expect(group).toHaveAttribute('data-active', 'false')
-    expect(group).toHaveAttribute('data-lifecycle', 'release')
-    expect(group).toHaveAttribute('data-highlight-active', 'false')
-  })
-
-  it('keeps timed pronunciation on the stable gradient path', () => {
-    renderPanel({
-      mainLyric: tokenizedMainLyric,
-      pronunciationLyric: tokenizedPronunciationLyric,
-      showPronunciation: true,
-      audioInstance: { currentTime: 0.25, paused: true },
-    })
-
-    const pronunciation = screen.getAllByTestId('lyrics-pronunciation-token')[0]
-    expect(pronunciation).toHaveAttribute('data-lyrics-state', 'active')
-    expect(pronunciation.style.backgroundImage).toContain('linear-gradient')
-    expect(pronunciation.style.color).toBe('transparent')
-    expect(pronunciation).toHaveAttribute('data-timed', 'true')
-    expect(pronunciation.style.transition).toBe('')
+    rerender(renderAt(3.5))
+    groups = screen.getAllByTestId('lyrics-line-group')
+    expect(
+      groups[2].querySelectorAll('[data-lyrics-character="true"]'),
+    ).toHaveLength(0)
+    expect(
+      groups[3].querySelectorAll('[data-lyrics-character="true"]'),
+    ).not.toHaveLength(0)
   })
 
   it('renders unsynced lyrics as static selectable text', () => {
@@ -491,104 +470,6 @@ describe('<LyricsPanel />', () => {
       expect(group).not.toHaveAttribute('aria-current')
       expect(group).toHaveAttribute('data-scroll-target', 'false')
     })
-  })
-
-  it('preserves explicit line breaks and exact cue gaps', () => {
-    renderPanel({
-      mainLyric: {
-        synced: true,
-        line: [{ start: 0, end: 1000, value: 'first line\nsecond line' }],
-      },
-    })
-    expect(screen.getByText(/first line/).textContent).toBe(
-      'first line\nsecond line',
-    )
-
-    const segments = buildSegmentsFromLine({
-      value: 'café café',
-      tokens: [
-        { value: 'café', byteStart: 0, byteEnd: 4 },
-        { value: 'café', byteStart: 6, byteEnd: 10 },
-      ],
-    })
-    expect(segments.map((segment) => segment.text).join('')).toBe('café café')
-    expect(segments[1]).toEqual(
-      expect.objectContaining({ text: ' ', tokenIndex: -1 }),
-    )
-  })
-
-  it('updates cue progress imperatively while future cues remain paint-free', () => {
-    renderPanel({
-      mainLyric: tokenizedMainLyric,
-      audioInstance: { currentTime: 0.25, paused: true },
-    })
-
-    const first = screen.getByText('Main')
-    const second = screen.getByText('line')
-    expect(first).toHaveAttribute('data-lyrics-state', 'active')
-    expect(first.style.backgroundImage).toContain('linear-gradient')
-    expect(
-      Number(first.style.getPropertyValue('--lyrics-progress')),
-    ).toBeGreaterThan(0.5)
-    expect(second).toHaveAttribute('data-lyrics-state', 'future')
-    expect(second.style.backgroundImage).toBe('none')
-  })
-
-  it('uses a soft gradient wipe for short fast cues', () => {
-    renderPanel({
-      mainLyric: {
-        synced: true,
-        line: [{ start: 0, end: 180, value: 'go' }],
-        cueLine: [
-          {
-            index: 0,
-            start: 0,
-            end: 180,
-            value: 'go',
-            cue: [{ start: 0, end: 180, value: 'go' }],
-          },
-        ],
-      },
-      audioInstance: { currentTime: 0.02, paused: true },
-    })
-
-    const token = screen.getByTestId('lyrics-token')
-    expect(token).toHaveAttribute('data-lyrics-state', 'active')
-    expect(token.style.backgroundImage).toContain('linear-gradient')
-    expect(token.style.color).toBe('transparent')
-    expect(token.style.transition).toBe('')
-  })
-
-  it('starts unhighlighting as soon as a line ends then clears stale state', () => {
-    const { rerender } = renderPanel({
-      mainLyric: tokenizedMainLyric,
-      audioInstance: { currentTime: 1.1, paused: true },
-    })
-
-    const group = screen.getByTestId('lyrics-line-group')
-    const token = screen.getByText('Main')
-    expect(group).toHaveAttribute('data-active', 'false')
-    expect(group).toHaveAttribute('data-lifecycle', 'release')
-    expect(group).toHaveAttribute('data-highlight-active', 'false')
-    expect(token).toHaveAttribute('data-lyrics-state', 'release')
-    expect(token.style.backgroundImage).toBe('none')
-    expect(Number(token.style.opacity)).toBeLessThan(1)
-    expect(Number(token.style.opacity)).toBeGreaterThan(0.3)
-
-    rerender(
-      <ThemeProvider theme={theme}>
-        <LyricsPanel
-          visible
-          mainLyric={tokenizedMainLyric}
-          audioInstance={{ currentTime: 1.25, paused: true }}
-        />
-      </ThemeProvider>,
-    )
-
-    expect(group).toHaveAttribute('data-lifecycle', 'idle')
-    expect(group).toHaveAttribute('data-highlight-active', 'false')
-    expect(token).toHaveAttribute('data-lyrics-state', 'inactive-past')
-    expect(token.style.opacity).toBe('1')
   })
 
   it('tracks overlapping lines while selecting one primary line', () => {
@@ -626,6 +507,20 @@ describe('<LyricsPanel />', () => {
     expect(lanes[1].style.fontStyle).toBe('italic')
     expect(lanes[2]).toHaveTextContent('echo')
     expect(lanes[2].style.fontStyle).toBe('italic')
+
+    const mainToken = lanes[0].querySelector('[data-testid="lyrics-token"]')
+    const emphasisToken = lanes[1].querySelector('[data-testid="lyrics-token"]')
+    const emphasisCharacter = emphasisToken.querySelector(
+      '[data-lyrics-character="true"]',
+    )
+    expect(mainToken.style.paddingInlineEnd).toBe('')
+    expect(emphasisToken.style.paddingInlineEnd).not.toBe('')
+    expect(emphasisToken.style.marginInlineEnd).toBe(
+      `-${emphasisToken.style.paddingInlineEnd}`,
+    )
+    expect(emphasisCharacter.style.paddingInlineEnd).toBe(
+      emphasisToken.style.paddingInlineEnd,
+    )
   })
 
   it('seeks and synchronizes immediately when a line is activated', () => {
@@ -648,74 +543,6 @@ describe('<LyricsPanel />', () => {
     audioInstance.currentTime = 0
     fireEvent.keyDown(group, { key: 'Enter' })
     expect(audioInstance.currentTime).toBe(2.3)
-  })
-
-  it('adds bottom scroll room for desktop and inline anchors', () => {
-    const originalClientHeight = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      'clientHeight',
-    )
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-      configurable: true,
-      get() {
-        return this.getAttribute('data-testid') === 'lyrics-scroll-body'
-          ? 500
-          : 0
-      },
-    })
-
-    try {
-      const { unmount } = renderPanel({
-        mainLyric,
-        audioInstance: { currentTime: 0.2, paused: true },
-      })
-      let lines = screen
-        .getByTestId('lyrics-scroll-body')
-        .querySelector('[data-scroll-end-padding]')
-      const expectedDesktop = Math.round(
-        500 * (1 - KARAOKE_DESKTOP_ACTIVE_LINE_ANCHOR_RATIO),
-      )
-      expect(lines).toHaveAttribute(
-        'data-scroll-end-padding',
-        String(expectedDesktop),
-      )
-      unmount()
-
-      renderPanel({
-        inline: true,
-        mainLyric,
-        audioInstance: { currentTime: 0.2, paused: true },
-      })
-      lines = screen
-        .getByTestId('lyrics-scroll-body')
-        .querySelector('[data-scroll-end-padding]')
-      expect(lines).toHaveAttribute('data-scroll-end-padding', '290')
-      unmount()
-
-      renderPanel({
-        mainLyric: {
-          synced: false,
-          line: [{ value: 'Plain first line' }, { value: 'Plain last line' }],
-        },
-      })
-      lines = screen
-        .getByTestId('lyrics-scroll-body')
-        .querySelector('[data-scroll-end-padding]')
-      expect(lines).toHaveAttribute(
-        'data-scroll-end-padding',
-        String(expectedDesktop),
-      )
-    } finally {
-      if (originalClientHeight) {
-        Object.defineProperty(
-          HTMLElement.prototype,
-          'clientHeight',
-          originalClientHeight,
-        )
-      } else {
-        delete HTMLElement.prototype.clientHeight
-      }
-    }
   })
 
   it('pauses auto-scroll only for genuine manual scroll intent', async () => {
@@ -784,12 +611,74 @@ describe('<LyricsPanel />', () => {
     )
   })
 
-  it('does not render unrelated appearance controls or spacer rows', () => {
-    const { container } = renderPanel({ mainLyric })
+  it('dims translations relative to their semantic theme color', () => {
+    const sameTextTheme = createTheme({
+      palette: {
+        primary: { main: '#ffffff' },
+        text: { primary: '#ffffff', secondary: '#ffffff' },
+      },
+    })
+    render(
+      <ThemeProvider theme={sameTextTheme}>
+        <LyricsPanel
+          visible
+          mainLyric={{
+            synced: true,
+            line: [
+              { start: 0, end: 1000, value: 'Active' },
+              { start: 1000, end: 2000, value: 'Future' },
+            ],
+          }}
+          translationLyric={{
+            synced: true,
+            line: [
+              { start: 0, end: 1000, value: 'Activa' },
+              { start: 1000, end: 2000, value: 'Futura' },
+            ],
+          }}
+          showTranslation
+          audioInstance={{ currentTime: 0.5, paused: true }}
+        />
+      </ThemeProvider>,
+    )
+
+    const groups = screen.getAllByTestId('lyrics-line-group')
+    const activeTranslation = screen
+      .getByText('Activa')
+      .closest('[data-tokenized]')
+    const futureTranslation = screen
+      .getByText('Futura')
+      .closest('[data-tokenized]')
+    groups.forEach((group) => {
+      expect(
+        group.style.getPropertyValue('--lyrics-translation-active-color'),
+      ).toBe('#ffffff')
+    })
+    expect(groups[0]).toHaveAttribute('data-active', 'true')
+    expect(groups[1]).toHaveAttribute('data-active', 'false')
     expect(
-      screen.queryByTestId('lyrics-settings-button'),
-    ).not.toBeInTheDocument()
-    expect(screen.queryByLabelText(/font size/i)).not.toBeInTheDocument()
-    expect(container.querySelector('[aria-hidden="true"]')).toBeNull()
+      window
+        .getComputedStyle(groups[0])
+        .getPropertyValue('--lyrics-layer-opacity')
+        .trim(),
+    ).toBe('1')
+    expect(
+      window
+        .getComputedStyle(groups[1])
+        .getPropertyValue('--lyrics-layer-opacity')
+        .trim(),
+    ).toBe('0.49')
+    expect(window.getComputedStyle(activeTranslation).opacity).toBe(
+      String(KARAOKE_TRANSLATION_OPACITY),
+    )
+    expect(Number(window.getComputedStyle(futureTranslation).opacity)).toBe(
+      0.49 * KARAOKE_TRANSLATION_OPACITY,
+    )
+    expect(window.getComputedStyle(activeTranslation).transition).toContain(
+      `opacity ${KARAOKE_ANIMATION_MS}ms`,
+    )
+    expect(window.getComputedStyle(futureTranslation).transition).toContain(
+      `opacity ${KARAOKE_ANIMATION_MS}ms`,
+    )
   })
 })

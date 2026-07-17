@@ -9,7 +9,6 @@ import {
 import {
   KARAOKE_CHARACTER_LIFT_PX,
   KARAOKE_CHARACTER_PHASE_SPREAD,
-  KARAOKE_CHARACTER_WAVE_DURATION_MS,
   KARAOKE_CLOCK_DRIFT_RESET_MS,
   KARAOKE_HIGHLIGHT_LEAD_MS,
   KARAOKE_LINE_RELEASE_MS,
@@ -47,33 +46,13 @@ const smootherStep = (value) =>
   value * value * value * (value * (value * 6 - 15) + 10)
 
 const setCharacterLift = (record, progress) => {
-  const characters = (record.characters || []).filter(
-    (node) => node.dataset.whitespace !== 'true',
-  )
+  const characters = record.characters || []
   if (!characters.length) return
 
-  const rawDuration = Number(record.window?.end) - Number(record.window?.start)
-  const tokenDuration =
-    Number.isFinite(rawDuration) && rawDuration > 0
-      ? rawDuration
-      : KARAOKE_CHARACTER_WAVE_DURATION_MS
-  const waveDuration = Math.min(
-    tokenDuration,
-    KARAOKE_CHARACTER_WAVE_DURATION_MS,
-  )
-  const elapsed = Math.max(0, Math.min(tokenDuration, progress * tokenDuration))
-  const waveProgress = Math.max(
-    0,
-    Math.min(1, elapsed / Math.max(1, waveDuration)),
-  )
-  const count = characters.length
-  const phaseSpread = count <= 1 ? 0 : KARAOKE_CHARACTER_PHASE_SPREAD
-  const riseSpan = Math.max(0.001, 1 - phaseSpread)
+  const riseSpan = Math.max(0.001, 1 - KARAOKE_CHARACTER_PHASE_SPREAD)
 
-  characters.forEach((node, index) => {
-    const phase =
-      count <= 1 ? 0 : (index / Math.max(1, count - 1)) * phaseSpread
-    const local = Math.max(0, Math.min(1, (waveProgress - phase) / riseSpan))
+  characters.forEach(({ node, phase }) => {
+    const local = Math.max(0, Math.min(1, (progress - phase) / riseSpan))
     const lift = Math.max(
       0,
       Math.min(
@@ -89,6 +68,33 @@ const setCharacterLift = (record, progress) => {
     if (node.style.transform !== nextTransform) {
       node.style.transform = nextTransform
     }
+  })
+}
+
+const setCharacterGradient = (record) => {
+  const tokenRect = record.node.getBoundingClientRect()
+  const tokenWidth = tokenRect.width || record.node.offsetWidth || 1
+  if (!record.presentation?.gradient) return
+
+  record.characters.forEach((character) => {
+    const { node } = character
+    const offset = node.getBoundingClientRect().left - tokenRect.left
+    if (
+      character.gradientWidth === tokenWidth &&
+      character.gradientOffset === offset
+    ) {
+      return
+    }
+    character.gradientWidth = tokenWidth
+    character.gradientOffset = offset
+    node.style.color = 'transparent'
+    node.style.webkitTextFillColor = 'transparent'
+    node.style.backgroundImage = record.presentation.gradient
+    node.style.backgroundSize = `${tokenWidth}px 100%`
+    node.style.backgroundPosition = `${-offset}px 0`
+    node.style.backgroundRepeat = 'no-repeat'
+    node.style.backgroundClip = 'text'
+    node.style.webkitBackgroundClip = 'text'
   })
 }
 
@@ -108,12 +114,30 @@ const setTokenActiveAlpha = (record, value) => {
 }
 
 const setGradientTokenColor = (record) => {
+  const paintNode = record.paintNode || record.node
+  const paintsOnChild = paintNode !== record.node
+
   record.node.style.color = 'transparent'
   record.node.style.webkitTextFillColor = 'transparent'
-  record.node.style.backgroundImage = record.presentation.gradient
-  record.node.style.backgroundSize = '100% 100%'
-  record.node.style.backgroundClip = 'text'
-  record.node.style.webkitBackgroundClip = 'text'
+  record.node.style.backgroundImage = paintsOnChild
+    ? 'none'
+    : record.presentation.gradient
+  record.node.style.backgroundSize = paintsOnChild ? 'auto' : '100% 100%'
+  record.node.style.backgroundClip = paintsOnChild ? 'border-box' : 'text'
+  record.node.style.webkitBackgroundClip = paintsOnChild ? 'border-box' : 'text'
+
+  if (!paintsOnChild) return
+
+  paintNode.style.color = 'transparent'
+  paintNode.style.webkitTextFillColor = 'transparent'
+  paintNode.style.backgroundImage = record.characters.length
+    ? 'none'
+    : record.presentation.gradient
+  paintNode.style.backgroundSize = '100% 100%'
+  paintNode.style.backgroundPosition = '0 0'
+  paintNode.style.backgroundRepeat = 'no-repeat'
+  paintNode.style.backgroundClip = 'text'
+  paintNode.style.webkitBackgroundClip = 'text'
 }
 
 const getInactiveTokenAlpha = (presentation = {}) =>
@@ -219,14 +243,40 @@ const useLyricsTimeline = ({
   const cursorRef = useRef(new LyricTimelineCursor(timeline))
   const lineNodesRef = useRef(new Map())
   const tokenRecordsRef = useRef(new Map())
+  const tokenRecordsByNodeRef = useRef(new WeakMap())
+  const tokenResizeObserverRef = useRef(null)
   const lineTokenKeysRef = useRef(new Map())
   const releaseIndexesRef = useRef(new Set())
   const frameRef = useRef(0)
   const lastPublishedIndexesRef = useRef([])
+  const lastPublishedPrimaryIndexRef = useRef(-1)
   const lastScrollTargetRef = useRef(-1)
   const lastAppliedTimeRef = useRef(0)
-  const [activeIndexes, setActiveIndexes] = useState([])
+  const [activeState, setActiveState] = useState(() => ({
+    indexes: [],
+    primaryIndex: -1,
+  }))
   const [scrollTargetIndex, setScrollTargetIndex] = useState(-1)
+
+  useLayoutEffect(() => {
+    const ResizeObserverConstructor = window.ResizeObserver
+    if (!ResizeObserverConstructor || reducedMotion) return undefined
+
+    const observer = new ResizeObserverConstructor((entries) => {
+      entries.forEach(({ target }) => {
+        const record = tokenRecordsByNodeRef.current.get(target)
+        if (record) setCharacterGradient(record)
+      })
+    })
+    tokenResizeObserverRef.current = observer
+    tokenRecordsRef.current.forEach((record) => {
+      if (record.characters.length) observer.observe(record.node)
+    })
+    return () => {
+      observer.disconnect()
+      tokenResizeObserverRef.current = null
+    }
+  }, [reducedMotion])
 
   const setLineState = useCallback((lineIndex, phase) => {
     const node = lineNodesRef.current.get(lineIndex)
@@ -258,10 +308,16 @@ const useLyricsTimeline = ({
     })
   }, [])
 
-  const publishActiveIndexes = useCallback((indexes) => {
-    if (sameIndexes(lastPublishedIndexesRef.current, indexes)) return
+  const publishActiveState = useCallback((indexes, nextPrimaryIndex) => {
+    if (
+      sameIndexes(lastPublishedIndexesRef.current, indexes) &&
+      lastPublishedPrimaryIndexRef.current === nextPrimaryIndex
+    ) {
+      return
+    }
     lastPublishedIndexesRef.current = indexes
-    setActiveIndexes(indexes)
+    lastPublishedPrimaryIndexRef.current = nextPrimaryIndex
+    setActiveState({ indexes, primaryIndex: nextPrimaryIndex })
   }, [])
 
   const publishScrollTarget = useCallback(
@@ -351,12 +407,14 @@ const useLyricsTimeline = ({
         )
       })
 
-      if (result.changed || forceSeek) publishActiveIndexes(result.indexes)
+      if (result.changed || forceSeek) {
+        publishActiveState(result.indexes, result.primaryIndex)
+      }
       publishScrollTarget(current)
       return result
     },
     [
-      publishActiveIndexes,
+      publishActiveState,
       publishScrollTarget,
       reducedMotion,
       resetLineTokens,
@@ -398,6 +456,8 @@ const useLyricsTimeline = ({
       const existing = tokenRecordsRef.current.get(key)
       if (!node) {
         if (existing) {
+          tokenResizeObserverRef.current?.unobserve(existing.node)
+          tokenRecordsByNodeRef.current.delete(existing.node)
           tokenRecordsRef.current.delete(key)
           const keys = lineTokenKeysRef.current.get(existing.lineIndex)
           keys?.delete(key)
@@ -408,20 +468,33 @@ const useLyricsTimeline = ({
         return
       }
 
+      const characterNodes = reducedMotion
+        ? []
+        : Array.from(node.querySelectorAll('[data-lyrics-character="true"]'))
+      const characterCount = characterNodes.length
+      const characters = characterNodes.map((characterNode, index) => ({
+        node: characterNode,
+        phase:
+          characterCount <= 1
+            ? 0
+            : (index / (characterCount - 1)) * KARAOKE_CHARACTER_PHASE_SPREAD,
+      }))
       const record = {
         key,
         node,
+        paintNode: node.querySelector('[data-lyrics-wave-text="true"]'),
         lineIndex: descriptor.lineIndex,
         window: descriptor.window,
         presentation: descriptor.presentation,
-        characters: reducedMotion
-          ? []
-          : Array.from(node.querySelectorAll('[data-lyrics-character="true"]')),
+        characters,
         progress: null,
         opacity: null,
         activeAlpha: null,
         state: null,
       }
+      setCharacterGradient(record)
+      tokenRecordsByNodeRef.current.set(node, record)
+      if (characters.length) tokenResizeObserverRef.current?.observe(node)
       tokenRecordsRef.current.set(key, record)
       if (!lineTokenKeysRef.current.has(record.lineIndex)) {
         lineTokenKeysRef.current.set(record.lineIndex, new Set())
@@ -475,8 +548,9 @@ const useLyricsTimeline = ({
     cursorRef.current = new LyricTimelineCursor(timeline)
     releaseIndexesRef.current.clear()
     lastPublishedIndexesRef.current = []
+    lastPublishedPrimaryIndexRef.current = -1
     lastScrollTargetRef.current = -1
-    setActiveIndexes([])
+    setActiveState({ indexes: [], primaryIndex: -1 })
     setScrollTargetIndex(-1)
     apply(mediaTimeMs(audioInstance), true)
   }, [apply, audioInstance, timeline])
@@ -613,8 +687,8 @@ const useLyricsTimeline = ({
   )
 
   return {
-    activeIndexes,
-    primaryIndex: activeIndexes.at(-1) ?? -1,
+    activeIndexes: activeState.indexes,
+    primaryIndex: activeState.primaryIndex,
     scrollTargetIndex,
     registerLine,
     registerToken,

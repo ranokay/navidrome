@@ -14,6 +14,7 @@ const usePlayerLyrics = ({
   isRadio,
   audioInstance,
   isDesktop,
+  translate,
 }) => {
   const [lyricsVisiblePreference, setLyricsVisiblePreference] = useState(false)
   const [lyricsRequested, setLyricsRequested] = useState(false)
@@ -28,6 +29,7 @@ const usePlayerLyrics = ({
     layers: lyricLayers,
     loading: lyricsLoading,
     error: lyricsError,
+    retry: retryLyrics,
   } = useEnhancedLyrics({
     trackId,
     updatedAt: trackUpdatedAt,
@@ -35,7 +37,6 @@ const usePlayerLyrics = ({
     requested: lyricsRequested || lyricsVisiblePreference,
   })
 
-  const hasMainLyric = hasStructuredLyricContent(lyricLayers.main)
   const hasTranslationLyric = hasStructuredLyricContent(lyricLayers.translation)
   const hasPronunciationLyric = hasStructuredLyricContent(
     lyricLayers.pronunciation,
@@ -51,13 +52,30 @@ const usePlayerLyrics = ({
   const lyricsToggleDisabled = isRadio || (!trackId && !lyricsVisiblePreference)
   const useInlineMobileLyrics = lyricsVisible && !isDesktop
 
+  const labels = useMemo(
+    () => ({
+      title: translate('player.lyricsTitleText'),
+      toggle: translate('player.toggleLyricText'),
+      loading: translate('player.lyricsLoadingText'),
+      unavailable: translate('player.lyricsUnavailableText'),
+      empty: translate('player.emptyLyricText'),
+      resize: translate('player.resizeLyricsSidebarText'),
+      showTranslation: translate('player.showLyricsTranslationText'),
+      hideTranslation: translate('player.hideLyricsTranslationText'),
+      showPronunciation: translate('player.showLyricsPronunciationText'),
+      hidePronunciation: translate('player.hideLyricsPronunciationText'),
+    }),
+    [translate],
+  )
+
   const toggleLyrics = useCallback(() => {
-    setLyricsVisiblePreference((current) => {
-      const next = !current
-      if (next) setLyricsRequested(true)
-      return next
-    })
-  }, [])
+    const next = !lyricsVisiblePreference
+    setLyricsVisiblePreference(next)
+    if (next) {
+      setLyricsRequested(true)
+      if (lyricsError) retryLyrics()
+    }
+  }, [lyricsError, lyricsVisiblePreference, retryLyrics])
 
   const closeLyrics = useCallback(() => {
     setLyricsVisiblePreference(false)
@@ -81,8 +99,10 @@ const usePlayerLyrics = ({
       lyricsActive: lyricsVisible,
       lyricsDisabled: lyricsToggleDisabled,
       lyricsLoading,
+      lyricsLabel: labels.toggle,
+      lyricsLoadingLabel: labels.loading,
     }),
-    [lyricsLoading, lyricsToggleDisabled, lyricsVisible, toggleLyrics],
+    [labels, lyricsLoading, lyricsToggleDisabled, lyricsVisible, toggleLyrics],
   )
 
   const desktopLyricsProps = useMemo(
@@ -100,12 +120,14 @@ const usePlayerLyrics = ({
       audioInstance,
       loading: lyricsLoading,
       error: lyricsError,
+      labels,
     }),
     [
       audioInstance,
       hasPronunciationLyric,
       hasTranslationLyric,
       isDesktop,
+      labels,
       lyricLayers.main,
       lyricLayers.pronunciation,
       lyricLayers.translation,
@@ -132,6 +154,7 @@ const usePlayerLyrics = ({
           audioInstance={audioInstance}
           loading={lyricsLoading}
           error={lyricsError}
+          labels={labels}
           inline
         />
       </MobileKaraokeLyricsPortal>
@@ -143,6 +166,7 @@ const usePlayerLyrics = ({
       lyricLayers.translation,
       lyricsError,
       lyricsLoading,
+      labels,
       showPronunciation,
       showTranslation,
       useInlineMobileLyrics,

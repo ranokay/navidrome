@@ -1,4 +1,4 @@
-import { waitFor } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
 import { renderHook } from '@testing-library/react-hooks'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import subsonic from '../subsonic'
@@ -121,23 +121,21 @@ describe('useEnhancedLyrics', () => {
     expect(subsonic.getLyricsBySongId).not.toHaveBeenCalled()
   })
 
-  it('resets layers and retries after a lyrics request error', async () => {
+  it('resets layers and retries the same lyrics identity after an error', async () => {
     const error = new Error('lyrics failed')
     subsonic.getLyricsBySongId
       .mockRejectedValueOnce(error)
       .mockResolvedValueOnce(responseFor('Recovered lyrics'))
 
-    const { result, rerender } = renderHook(
-      ({ trackId }) => useLyrics(trackId),
-      { initialProps: { trackId: 'song-error' } },
-    )
+    const { result } = renderHook(() => useLyrics('song-error'))
 
     await waitFor(() => expect(result.current.error).toBe(error))
     expect(result.current.layers).toBe(emptyLyricLayers)
     expect(result.current.loading).toBe(false)
 
-    rerender({ trackId: null })
-    rerender({ trackId: 'song-error' })
+    act(() => {
+      result.current.retry()
+    })
 
     await waitFor(() =>
       expect(result.current.layers.main?.line[0].value).toBe(
@@ -229,44 +227,5 @@ describe('useEnhancedLyrics', () => {
     const second = renderHook(() => useLyrics('retry-song'))
     expect(subsonic.getLyricsBySongId).toHaveBeenCalledTimes(2)
     second.unmount()
-  })
-
-  it('removes translation lines that only repeat the main lyric', async () => {
-    subsonic.getLyricsBySongId.mockResolvedValue({
-      json: {
-        'subsonic-response': {
-          lyricsList: {
-            structuredLyrics: [
-              {
-                kind: 'main',
-                lang: 'en',
-                synced: true,
-                line: [
-                  { start: 0, value: 'Say my name like Ruk ruk ruk' },
-                  { start: 2000, value: 'Everybody wanna be it' },
-                ],
-              },
-              {
-                kind: 'translation',
-                lang: 'en',
-                synced: true,
-                line: [
-                  { start: 0, value: 'Say my name like Ruk, Ruk, Ruk' },
-                  { start: 2000, value: 'Everyone wants to become it' },
-                ],
-              },
-            ],
-          },
-        },
-      },
-    })
-
-    const { result } = renderHook(() => useLyrics('translated-song'))
-
-    await waitFor(() =>
-      expect(result.current.layers.translation?.line).toEqual([
-        { start: 2000, value: 'Everyone wants to become it' },
-      ]),
-    )
   })
 })

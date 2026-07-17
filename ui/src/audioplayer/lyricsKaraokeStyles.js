@@ -43,10 +43,3 @@ export const parseColorRGB = (color) => {
   const rgb = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
   return rgb ? [parseInt(rgb[1]), parseInt(rgb[2]), parseInt(rgb[3])] : null
 }
-
-export const colorWithAlpha = (color, alpha) => {
-  const rgb = parseColorRGB(color)
-  if (!rgb) return color
-  const [r, g, b] = rgb
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}

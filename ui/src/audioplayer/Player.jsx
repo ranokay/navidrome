@@ -154,6 +154,7 @@ const Player = () => {
     isRadio: playerState.current?.isRadio || false,
     audioInstance,
     isDesktop,
+    translate,
   })
 
   useEffect(() => {

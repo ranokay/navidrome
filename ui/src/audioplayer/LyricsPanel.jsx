@@ -1,4 +1,4 @@
-import { makeStyles, useTheme } from '@material-ui/core/styles'
+import { alpha, makeStyles, useTheme } from '@material-ui/core/styles'
 import clsx from 'clsx'
 import React, {
   useCallback,
@@ -9,8 +9,6 @@ import React, {
   useState,
 } from 'react'
 import {
-  buildHighlightedAuxLine,
-  buildHighlightedMainLine,
   buildKaraokeLines,
   hasStructuredLyricContent,
   hasUsableKaraokeTiming,
@@ -27,8 +25,8 @@ import {
   KARAOKE_LINE_MOTION_EASING,
   KARAOKE_MANUAL_SCROLL_PAUSE_MS,
   KARAOKE_SCROLLBAR_VISIBLE_MS,
+  KARAOKE_TRANSLATION_OPACITY,
 } from './lyricsKaraokeConstants'
-import { colorWithAlpha } from './lyricsKaraokeStyles'
 import {
   animateScrollTop,
   cancelScrollAnimation,
@@ -38,6 +36,9 @@ import {
 import useLyricsTimeline from './useLyricsTimeline'
 
 const KARAOKE_LAYER_OPACITY_TRANSITION = `opacity ${KARAOKE_ANIMATION_MS}ms ${KARAOKE_EASING}`
+const KARAOKE_IDLE_LAYER_OPACITY = 0.49
+const KARAOKE_TRANSLATION_IDLE_OPACITY =
+  KARAOKE_IDLE_LAYER_OPACITY * KARAOKE_TRANSLATION_OPACITY
 
 const useStyles = makeStyles((theme) => ({
   root: {
@@ -111,16 +112,25 @@ const useStyles = makeStyles((theme) => ({
       'var(--lyrics-pronunciation-idle-color, currentColor)',
     '--lyrics-translation-current-color':
       'var(--lyrics-translation-idle-color, currentColor)',
-    '--lyrics-layer-opacity': 0.49,
+    '--lyrics-layer-opacity': KARAOKE_IDLE_LAYER_OPACITY,
     transform: 'translateY(0)',
     transition: `background-color 150ms ${KARAOKE_LINE_MOTION_EASING}`,
-    '&[role="button"]:hover, &[role="button"]:focus-visible': {
-      backgroundColor: colorWithAlpha(theme.palette.text.primary, 0.055),
+    '&[role="button"]:focus-visible': {
+      backgroundColor: alpha(theme.palette.text.primary, 0.055),
+    },
+    '@media (hover: hover) and (pointer: fine)': {
+      '&[role="button"]:hover': {
+        backgroundColor: alpha(theme.palette.text.primary, 0.055),
+      },
     },
     '&[data-raised="true"][data-line-motion="line"]': {
       transform: `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
       transition: `transform ${KARAOKE_LINE_ENTER_MS}ms ${KARAOKE_LINE_MOTION_EASING}, background-color 150ms ${KARAOKE_LINE_MOTION_EASING}`,
     },
+    '&[data-raised="true"][data-line-motion="character"][data-character-wave="false"]':
+      {
+        transform: `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
+      },
     '&[data-active="true"]': {
       '--lyrics-main-current-color':
         'var(--lyrics-main-active-color, var(--lyrics-main-idle-color, currentColor))',
@@ -146,6 +156,7 @@ const useStyles = makeStyles((theme) => ({
   },
   line: {
     display: 'inline-block',
+    width: '100%',
     maxWidth: '100%',
     fontWeight: 700,
     fontSize: 24,
@@ -177,19 +188,32 @@ const useStyles = makeStyles((theme) => ({
     overflowWrap: 'anywhere',
     whiteSpace: 'pre-wrap',
     letterSpacing: 0,
-    opacity: 'var(--lyrics-layer-opacity)',
+    opacity: KARAOKE_TRANSLATION_IDLE_OPACITY,
     color: 'var(--lyrics-translation-active-color, currentColor)',
     WebkitTextFillColor: 'var(--lyrics-translation-active-color, currentColor)',
     transition: KARAOKE_LAYER_OPACITY_TRANSITION,
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'none',
+      transform: 'none',
     },
+  },
+  characterWaveAuxLine: {
+    transform: `translateY(-${KARAOKE_LINE_LIFT_PX}px)`,
+    transition: `${KARAOKE_LAYER_OPACITY_TRANSITION}, transform ${KARAOKE_LINE_ENTER_MS}ms ${KARAOKE_LINE_MOTION_EASING}`,
+    '@media (prefers-reduced-motion: reduce)': {
+      transition: 'none',
+      transform: 'none',
+    },
+  },
+  activeAuxLine: {
+    opacity: KARAOKE_TRANSLATION_OPACITY,
   },
   stackedToken: {
     display: 'inline-flex',
     flexDirection: 'column',
     alignItems: 'flex-start',
     verticalAlign: 'top',
+    width: 'max-content',
     minWidth: 0,
     maxWidth: '100%',
     overflowWrap: 'anywhere',
@@ -201,6 +225,10 @@ const useStyles = makeStyles((theme) => ({
     '& $stackedToken': {
       marginBottom: theme.spacing(0.95),
     },
+  },
+  stackedSpacer: {
+    display: 'inline',
+    whiteSpace: 'pre-wrap',
   },
   stackedMainText: {
     display: 'block',
@@ -258,7 +286,7 @@ const useStyles = makeStyles((theme) => ({
     alignItems: 'center',
     justifyContent: 'center',
     padding: theme.spacing(3),
-    color: colorWithAlpha(theme.palette.text.primary, 0.68),
+    color: alpha(theme.palette.text.primary, 0.68),
     fontWeight: 600,
     textAlign: 'center',
   },
@@ -354,11 +382,10 @@ const buildUniqueLayerMap = (mainLines, layerLines) => {
 const getLineLanes = (line) =>
   Array.isArray(line?.lanes) && line.lanes.length > 0 ? line.lanes : [line]
 
-const buildSynchronizedTranslationLine = (mainLine, translationLine) => {
-  const highlighted = buildHighlightedAuxLine(mainLine, translationLine)
-  if (!highlighted) return highlighted
+const buildSynchronizedTranslationLine = (_mainLine, translationLine) => {
+  if (!translationLine) return null
   return {
-    ...highlighted,
+    ...translationLine,
     tokens: [],
     lanes: undefined,
   }
@@ -410,6 +437,7 @@ const LyricsPanel = ({
   inline = false,
   loading = false,
   error = null,
+  labels = {},
 }) => {
   const classes = useStyles()
   const theme = useTheme()
@@ -483,20 +511,26 @@ const LyricsPanel = ({
   const layerStyles = useMemo(() => {
     const styleFor = (layer) => {
       const sourceColor = colors[layer]
+      if (layer === 'translation') {
+        return {
+          opacity: 1,
+          color: sourceColor,
+          '--lyrics-active-color': sourceColor,
+        }
+      }
       if (!hasTimedMainLines) {
         return {
           opacity: 1,
-          color: colorWithAlpha(sourceColor, layer === 'main' ? 0.98 : 0.86),
+          color: alpha(sourceColor, layer === 'main' ? 0.98 : 0.86),
         }
       }
-      const activeAlpha =
-        layer === 'main' ? 0.98 : layer === 'translation' ? 0.72 : 0.78
+      const activeAlpha = layer === 'main' ? 0.98 : 0.78
       const pronunciationFadeRatio = 0.38 / 0.78
       const idleAlpha = activeAlpha * pronunciationFadeRatio
       return {
         opacity: 1,
-        color: colorWithAlpha(sourceColor, idleAlpha),
-        '--lyrics-active-color': colorWithAlpha(sourceColor, activeAlpha),
+        color: alpha(sourceColor, idleAlpha),
+        '--lyrics-active-color': alpha(sourceColor, activeAlpha),
       }
     }
     return {
@@ -637,10 +671,10 @@ const LyricsPanel = ({
 
   if (!hasStructuredLyricContent(mainLyric) || mainLines.length === 0) {
     const message = loading
-      ? 'Loading lyrics'
+      ? labels.loading || 'Loading lyrics'
       : error
-        ? 'Lyrics unavailable'
-        : 'No lyrics available'
+        ? labels.unavailable || 'Lyrics unavailable'
+        : labels.empty || 'No lyrics available'
     return (
       <div
         className={clsx(classes.root, { [classes.inlineRoot]: inline })}
@@ -711,6 +745,9 @@ const LyricsPanel = ({
             )
             const canSeekLine = Boolean(audioInstance && line.start != null)
             const isActiveLine = activeIndexSet.has(idx)
+            const renderCharacterWave = Boolean(
+              !prefersReducedMotion && hasTimedMainLines && isActiveLine,
+            )
             const isStaticLine = !hasTimedMainLines
             return (
               <div
@@ -722,6 +759,7 @@ const LyricsPanel = ({
                 }
                 className={classes.lineGroup}
                 data-line-motion={usesCharacterRise ? 'character' : 'line'}
+                data-character-wave={renderCharacterWave ? 'true' : 'false'}
                 data-active={isStaticLine || isActiveLine ? 'true' : 'false'}
                 {...(isStaticLine
                   ? {
@@ -766,18 +804,14 @@ const LyricsPanel = ({
                         [classes.inlineLine]: inline,
                         [classes.secondaryVoiceLane]: laneIdx > 0,
                       })
-                      const highlightedLane = buildHighlightedMainLine(lane)
                       const rowKey = lane.key || `lane-${laneIdx}`
 
                       return showPr && laneIdx === 0 ? (
                         <KaraokeStackedLineRow
                           key={rowKey}
                           lineIndex={idx}
-                          line={highlightedLane}
-                          pronunciationLine={buildHighlightedAuxLine(
-                            line,
-                            prLine,
-                          )}
+                          line={lane}
+                          pronunciationLine={prLine}
                           pronunciationStyle={layerStyles.pronunciation}
                           nextLineStart={mainNextLineStart}
                           className={laneClassName}
@@ -786,6 +820,7 @@ const LyricsPanel = ({
                           waveCharacterClassName={classes.waveCharacter}
                           classes={classes}
                           registerToken={registerToken}
+                          renderCharacterWave={renderCharacterWave}
                           rowKey={rowKey}
                           testId="lyrics-voice-lane"
                         />
@@ -793,13 +828,14 @@ const LyricsPanel = ({
                         <KaraokeLineRow
                           key={rowKey}
                           lineIndex={idx}
-                          line={highlightedLane}
+                          line={lane}
                           nextLineStart={mainNextLineStart}
                           className={laneClassName}
                           style={layerStyles.main}
                           tokenClassName={classes.token}
                           waveCharacterClassName={classes.waveCharacter}
                           registerToken={registerToken}
+                          renderCharacterWave={renderCharacterWave}
                           rowKey={rowKey}
                           testId="lyrics-voice-lane"
                         />
@@ -809,8 +845,8 @@ const LyricsPanel = ({
                 ) : showPr ? (
                   <KaraokeStackedLineRow
                     lineIndex={idx}
-                    line={buildHighlightedMainLine(line)}
-                    pronunciationLine={buildHighlightedAuxLine(line, prLine)}
+                    line={line}
+                    pronunciationLine={prLine}
                     pronunciationStyle={layerStyles.pronunciation}
                     nextLineStart={mainNextLineStart}
                     className={clsx(classes.line, {
@@ -821,12 +857,13 @@ const LyricsPanel = ({
                     waveCharacterClassName={classes.waveCharacter}
                     classes={classes}
                     registerToken={registerToken}
+                    renderCharacterWave={renderCharacterWave}
                     rowKey="main"
                   />
                 ) : (
                   <KaraokeLineRow
                     lineIndex={idx}
-                    line={buildHighlightedMainLine(line)}
+                    line={line}
                     nextLineStart={mainNextLineStart}
                     className={clsx(classes.line, {
                       [classes.inlineLine]: inline,
@@ -835,6 +872,7 @@ const LyricsPanel = ({
                     tokenClassName={classes.token}
                     waveCharacterClassName={classes.waveCharacter}
                     registerToken={registerToken}
+                    renderCharacterWave={renderCharacterWave}
                     rowKey="main"
                   />
                 )}
@@ -843,7 +881,10 @@ const LyricsPanel = ({
                     lineIndex={idx}
                     line={buildSynchronizedTranslationLine(line, trLine)}
                     nextLineStart={null}
-                    className={clsx(classes.auxLine, classes.translationLine)}
+                    className={clsx(classes.auxLine, classes.translationLine, {
+                      [classes.characterWaveAuxLine]: renderCharacterWave,
+                      [classes.activeAuxLine]: isStaticLine || isActiveLine,
+                    })}
                     style={layerStyles.translation}
                     tokenClassName={classes.token}
                     rowKey="translation"

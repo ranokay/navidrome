@@ -84,4 +84,29 @@ describe('<MobileKaraokeLyricsPortal />', () => {
     )
     expect(host).toHaveClass(MOBILE_KARAOKE_LYRICS_ACTIVE_CLASS)
   })
+
+  it('moves active lyrics when the mobile cover host is replaced', async () => {
+    const firstHost = document.createElement('div')
+    firstHost.className = MOBILE_KARAOKE_LYRICS_HOST_SELECTOR.slice(1)
+    document.body.appendChild(firstHost)
+
+    render(
+      <MobileKaraokeLyricsPortal active>
+        <span>Persistent lyrics</span>
+      </MobileKaraokeLyricsPortal>,
+    )
+    expect(within(firstHost).getByText('Persistent lyrics')).toBeInTheDocument()
+
+    const secondHost = document.createElement('div')
+    secondHost.className = MOBILE_KARAOKE_LYRICS_HOST_SELECTOR.slice(1)
+    firstHost.replaceWith(secondHost)
+
+    await waitFor(() =>
+      expect(
+        within(secondHost).getByText('Persistent lyrics'),
+      ).toBeInTheDocument(),
+    )
+    expect(firstHost).not.toHaveClass(MOBILE_KARAOKE_LYRICS_ACTIVE_CLASS)
+    expect(secondHost).toHaveClass(MOBILE_KARAOKE_LYRICS_ACTIVE_CLASS)
+  })
 })

@@ -120,6 +120,7 @@ describe('<PlayerToolbar />', () => {
         'toggle-lyrics-button',
       )
       expect(lyricsButton).toHaveClass('MuiIconButton-colorPrimary')
+      expect(lyricsButton).toHaveAttribute('aria-pressed', 'true')
 
       fireEvent.click(lyricsButton)
 
@@ -183,6 +184,7 @@ describe('<PlayerToolbar />', () => {
       expect(lyricsButton).toBeDisabled()
       expect(lyricsButton).toHaveAttribute('aria-label', 'Loading lyrics')
       expect(lyricsButton).toHaveAttribute('aria-busy', 'true')
+      expect(lyricsButton).toHaveAttribute('aria-pressed', 'false')
     })
   })
 

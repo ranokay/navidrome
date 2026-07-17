@@ -64,6 +64,8 @@ const PlayerToolbar = ({
   lyricsActive = false,
   lyricsDisabled = false,
   lyricsLoading = false,
+  lyricsLabel = 'Toggle lyrics',
+  lyricsLoadingLabel = 'Loading lyrics',
 }) => {
   const dispatch = useDispatch()
   const { data, loading } = useGetOne('song', id, { enabled: !!id && !isRadio })
@@ -109,8 +111,9 @@ const PlayerToolbar = ({
     />
   )
 
+  const currentLyricsLabel = lyricsLoading ? lyricsLoadingLabel : lyricsLabel
   const lyricsButton = (
-    <Tooltip title={lyricsLoading ? 'Loading lyrics' : 'Toggle lyrics'}>
+    <Tooltip title={currentLyricsLabel}>
       <span>
         <IconButton
           size={isDesktop ? 'small' : undefined}
@@ -119,8 +122,9 @@ const PlayerToolbar = ({
           data-testid="toggle-lyrics-button"
           className={buttonClass}
           color={lyricsActive ? 'primary' : 'default'}
-          aria-label={lyricsLoading ? 'Loading lyrics' : 'Toggle lyrics'}
+          aria-label={currentLyricsLabel}
           aria-busy={lyricsLoading}
+          aria-pressed={lyricsActive}
         >
           <RiFileMusicLine
             className={!isDesktop ? classes.mobileIcon : undefined}

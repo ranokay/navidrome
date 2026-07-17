@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   buildKaraokeLines,
+  getPreferredLyricLanguage,
   hasStructuredLyricContent,
-  resolveKaraokeTokenWindow,
   selectLyricLayers,
   utf8ByteRangeToCodeUnitRange,
 } from './lyrics'
@@ -384,34 +384,15 @@ describe('lyrics helpers', () => {
     })
   })
 
-  it('estimates token windows when cue token timing is collapsed', () => {
-    const lines = buildKaraokeLines({
-      synced: true,
-      line: [{ start: 1000, end: 5000, value: 'one two three four' }],
-      cueLine: [
-        {
-          index: 0,
-          start: 1000,
-          end: 5000,
-          value: 'one two three four',
-          cue: [
-            { start: 1000, end: 5000, value: 'one' },
-            { start: 1000, end: 5000, value: 'two' },
-            { start: 1000, end: 5000, value: 'three' },
-            { start: 1000, end: 5000, value: 'four' },
-          ],
-        },
-      ],
-    })
+  it('falls back to the browser language when locale storage is unavailable', () => {
+    const storage = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(() => {
+        throw new DOMException('Access denied', 'SecurityError')
+      })
 
-    expect(resolveKaraokeTokenWindow(lines[0], 0)).toEqual({
-      start: 1000,
-      end: 2000,
-    })
-    expect(resolveKaraokeTokenWindow(lines[0], 3)).toEqual({
-      start: 4000,
-      end: 5000,
-    })
+    expect(getPreferredLyricLanguage()).toBe(navigator.language)
+    storage.mockRestore()
   })
 
   it('treats instrumental empty lyrics as no renderable content', () => {

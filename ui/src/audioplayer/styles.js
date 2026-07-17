@@ -32,7 +32,7 @@ const useStyle = makeStyles(
           display: 'none',
         },
       },
-      '@media (prefers-reduced-motion)': {
+      '@media (prefers-reduced-motion: reduce)': {
         '& .music-player-panel .panel-content div.img-rotate': {
           animation: 'none',
         },
@@ -81,11 +81,18 @@ const useStyle = makeStyles(
           transform: 'scale(0.985)',
           transition:
             'opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), transform 260ms cubic-bezier(0.22, 1, 0.36, 1)',
+          '@media (prefers-reduced-motion: reduce)': {
+            transition: 'opacity 120ms linear',
+            transform: 'none',
+          },
         },
       '& .react-jinke-music-player-mobile .react-jinke-music-player-mobile-cover .nd-mobile-lyrics-layer[data-entered="true"]':
         {
           opacity: 1,
           transform: 'scale(1)',
+          '@media (prefers-reduced-motion: reduce)': {
+            transform: 'none',
+          },
         },
       '& .react-jinke-music-player-mobile .react-jinke-music-player-mobile-cover img.cover':
         {
@@ -93,12 +100,19 @@ const useStyle = makeStyles(
           objectFit: 'contain', // Fix cover display when image is not square
           transition:
             'opacity 260ms cubic-bezier(0.22, 1, 0.36, 1), transform 260ms cubic-bezier(0.22, 1, 0.36, 1)',
+          '@media (prefers-reduced-motion: reduce)': {
+            transition: 'opacity 120ms linear',
+            transform: 'none',
+          },
         },
       '& .react-jinke-music-player-mobile .react-jinke-music-player-mobile-cover.nd-mobile-lyrics-active img.cover':
         {
           opacity: 0,
           transform: 'scale(0.96)',
           pointerEvents: 'none',
+          '@media (prefers-reduced-motion: reduce)': {
+            transform: 'none',
+          },
         },
       // Hide old singer display
       '& .react-jinke-music-player-mobile .react-jinke-music-player-mobile-singer':
