@@ -269,6 +269,7 @@ func TestPublicationStateRequiresActiveGeneration(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &state))
 	require.Equal(t, generation, state.Generation)
 	require.Equal(t, "scope", state.Scope)
+	require.Greater(t, state.ExpiresAt, time.Now().Unix())
 
 	// A reload mints a new generation: persisted state from the old generation
 	// is no longer authoritative even while its rows remain in the database.
@@ -447,4 +448,75 @@ func TestPublicationSchemaUpgradesFromPreviousVersion(t *testing.T) {
 	_, exists, err = reloaded.Get(t.Context(), publicationState+track)
 	require.NoError(t, err)
 	require.True(t, exists)
+}
+
+func TestTerminalAdmissionCannotBeResumedOrCommitted(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	admission := admitTestPublication(t, service, "generation-1", track, "classic", "call")
+	require.True(t, admission.Accepted)
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", admission.Token, track, false, 0)))
+
+	resume, err := json.Marshal(publicationAdmissionRequest{
+		Version: publicationVersion, Action: "resume", RequestID: "call",
+		Generation: "generation-1", Track: track, Scope: "scope", Kind: "sweep", Token: admission.Token,
+	})
+	require.NoError(t, err)
+	require.Error(t, service.admitPublication(t.Context(), track, resume))
+	require.Error(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", admission.Token, track, false, 0)))
+}
+
+func TestAwaitTailTerminalPhaseCannotReplay(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	refresh := admitTestPublication(t, service, "generation-1", track, "refresh", "refresh")
+	require.True(t, refresh.Accepted)
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", refresh.Token, track, true, 0)))
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", refresh.Token, track, false, 0)))
+
+	resume, err := json.Marshal(publicationAdmissionRequest{
+		Version: publicationVersion, Action: "resume", RequestID: "tail",
+		Generation: "generation-1", Track: track, Scope: "scope", Kind: "tail", Token: refresh.Token,
+	})
+	require.NoError(t, err)
+	require.Error(t, service.admitPublication(t.Context(), track, resume))
+	require.Error(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", refresh.Token, track, false, 0)))
+}
+
+func TestPublicationControlMergeIsMonotonic(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	target := "cooldown:test"
+	merge := func(value, ttl int64) {
+		t.Helper()
+		request, err := json.Marshal(publicationControlMerge{Value: value, TTL: ttl})
+		require.NoError(t, err)
+		require.NoError(t, service.SetWithTTL(t.Context(), publicationControlPrefix+target, request, ttl+60))
+	}
+	read := func() string {
+		t.Helper()
+		raw, exists, err := service.Get(t.Context(), target)
+		require.NoError(t, err)
+		require.True(t, exists)
+		return string(raw)
+	}
+
+	merge(100, 60)
+	require.Equal(t, "100", read())
+	merge(50, 300)
+	require.Equal(t, "100", read(), "a stale smaller merge shortened the value")
+	var expiry int64
+	require.NoError(t, service.db.QueryRowContext(t.Context(),
+		`SELECT CAST(strftime('%s', expires_at) AS INTEGER) FROM kvstore WHERE key=?`, target).Scan(&expiry))
+	require.GreaterOrEqual(t, expiry, time.Now().Unix()+250, "a stale merge shortened the deadline")
+	merge(200, 10)
+	require.Equal(t, "200", read())
+
+	request, err := json.Marshal(publicationControlMerge{Value: 1, TTL: 60})
+	require.NoError(t, err)
+	require.Error(t, service.SetWithTTL(t.Context(), publicationControlPrefix+publicationState+"x", request, 120))
 }

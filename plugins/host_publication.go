@@ -25,6 +25,7 @@ const (
 	publicationAdmissionPrefix = publicationPrefix + "admission:"
 	publicationCommit          = publicationPrefix + "commit:"
 	publicationState           = publicationPrefix + "state:"
+	publicationControlPrefix   = publicationPrefix + "control:"
 	publicationHostScope       = "@host"
 	publicationVersion         = 1
 	publicationTTL             = 30 * time.Minute
@@ -64,6 +65,11 @@ type publicationWrite struct {
 	TTL   int64  `json:"ttl"`
 }
 
+type publicationControlMerge struct {
+	Value int64 `json:"value"`
+	TTL   int64 `json:"ttl"`
+}
+
 type publicationCommitRequest struct {
 	Version           int                `json:"version"`
 	Generation        string             `json:"generation"`
@@ -84,6 +90,7 @@ type publicationStateResponse struct {
 	Scope      string `json:"scope,omitempty"`
 	Revision   string `json:"revision,omitempty"`
 	Complete   bool   `json:"complete,omitempty"`
+	ExpiresAt  int64  `json:"expiresAt,omitempty"`
 }
 
 type publicationActiveResponse struct {
@@ -206,6 +213,12 @@ func (s *kvstoreServiceImpl) handlePublicationSet(ctx context.Context, key strin
 	case strings.HasPrefix(key, publicationCommit):
 		track := strings.TrimPrefix(key, publicationCommit)
 		return s.commitPublication(ctx, track, value)
+	case strings.HasPrefix(key, publicationControlPrefix):
+		target := strings.TrimPrefix(key, publicationControlPrefix)
+		if target == "" || isPublicationKey(target) {
+			return fmt.Errorf("%w: invalid control target", errPublicationRejected)
+		}
+		return s.mergeControl(ctx, target, value)
 	default:
 		return fmt.Errorf("%w: reserved publication key", errPublicationRejected)
 	}
@@ -252,9 +265,9 @@ func (s *kvstoreServiceImpl) admitPublication(ctx context.Context, track string,
 	case "release":
 		return s.releaseAdmission(ctx, track, request, current, exists)
 	case "resume":
-		if !exists || current.Generation != request.Generation || current.Token != request.Token ||
-			(current.Scope != publicationHostScope && current.Scope != request.Scope) ||
-			current.State == "released" {
+		if !exists || current.State != "active" ||
+			current.Generation != request.Generation || current.Token != request.Token ||
+			(current.Scope != publicationHostScope && current.Scope != request.Scope) {
 			return fmt.Errorf("%w: stale admission", errPublicationRejected)
 		}
 		return nil
@@ -353,13 +366,15 @@ func (s *kvstoreServiceImpl) admissionResponse(ctx context.Context, track string
 func (s *kvstoreServiceImpl) stateResponse(ctx context.Context, track string) ([]byte, bool, error) {
 	var generation, scope, revision string
 	var complete bool
+	var expiresAt int64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT state.generation, state.scope, state.revision, state.complete
+		SELECT state.generation, state.scope, state.revision, state.complete,
+			CAST(strftime('%s', state.expires_at) AS INTEGER)
 		FROM plugin_publication_state state
 		JOIN plugin_publication_generation active ON active.id = 1
 		WHERE state.track_key = ? AND state.expires_at > CURRENT_TIMESTAMP
 			AND state.generation = active.generation
-	`, track).Scan(&generation, &scope, &revision, &complete)
+	`, track).Scan(&generation, &scope, &revision, &complete, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -368,6 +383,7 @@ func (s *kvstoreServiceImpl) stateResponse(ctx context.Context, track string) ([
 	}
 	value, err := json.Marshal(publicationStateResponse{
 		Handled: true, Generation: generation, Scope: scope, Revision: revision, Complete: complete,
+		ExpiresAt: expiresAt,
 	})
 	return value, err == nil, err
 }
@@ -459,7 +475,7 @@ func (s *kvstoreServiceImpl) applyCommitTx(ctx context.Context, tx *sql.Tx, trac
 		return err
 	}
 	if admissionGeneration != batch.Generation || token != batch.Token ||
-		(scope != publicationHostScope && scope != batch.Scope) || state == "released" || valid != 1 {
+		(scope != publicationHostScope && scope != batch.Scope) || state != "active" || valid != 1 {
 		return fmt.Errorf("%w: stale admission", errPublicationRejected)
 	}
 	if err := s.checkCommitQuota(ctx, tx, batch.Writes); err != nil {
@@ -477,6 +493,66 @@ func (s *kvstoreServiceImpl) applyCommitTx(ctx context.Context, tx *sql.Tx, trac
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE plugin_publication_admissions SET state=?, expires_at=? WHERE track_key=?`, admissionState, time.Now().Add(publicationTTL).UTC().Format("2006-01-02 15:04:05"), track)
 	return err
+}
+
+// mergeControl atomically raises a scalar KV record to the requested value.
+// Cooldown and failure state use it so concurrent capable-host writers cannot
+// shorten a newer deadline or erase a newer observation.
+func (s *kvstoreServiceImpl) mergeControl(ctx context.Context, target string, payload []byte) error {
+	var request publicationControlMerge
+	if err := json.Unmarshal(payload, &request); err != nil || request.Value <= 0 ||
+		request.TTL <= 0 || request.TTL > int64(publicationStateTTL/time.Second) {
+		return fmt.Errorf("%w: invalid control merge", errPublicationRejected)
+	}
+	s.publicationMu.Lock()
+	defer s.publicationMu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var oldValue, oldSize, oldExpires int64
+	var valid int
+	err = tx.QueryRowContext(ctx, `
+		SELECT COALESCE(CAST(value AS INTEGER),0), COALESCE(size,0),
+			COALESCE(CAST(strftime('%s', expires_at) AS INTEGER),0),
+			CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END
+		FROM kvstore WHERE key = ?
+	`, target).Scan(&oldValue, &oldSize, &oldExpires, &valid)
+	if errors.Is(err, sql.ErrNoRows) {
+		oldValue, oldSize, oldExpires, valid = 0, 0, 0, 0
+	} else if err != nil {
+		return err
+	}
+	newValue := request.Value
+	if valid == 1 && oldValue > newValue {
+		newValue = oldValue
+	}
+	newExpiry := time.Now().Unix() + request.TTL
+	if valid == 1 && oldExpires > newExpiry {
+		newExpiry = oldExpires
+	}
+	value := strconv.FormatInt(newValue, 10)
+	delta := int64(len(value)) - oldSize
+	if delta > 0 {
+		used, err := storageUsedTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if used+delta > s.maxSize {
+			return fmt.Errorf("%w: storage limit", errPublicationRejected)
+		}
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO kvstore (key, value, size, created_at, updated_at, expires_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, datetime(?, 'unixepoch'))
+		ON CONFLICT(key) DO UPDATE SET
+			value=excluded.value, size=excluded.size, updated_at=CURRENT_TIMESTAMP, expires_at=excluded.expires_at
+	`, target, value, len(value), newExpiry)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *kvstoreServiceImpl) checkCommitQuota(ctx context.Context, tx *sql.Tx, writes []publicationWrite) error {
