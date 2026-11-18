@@ -1,7 +1,9 @@
 package plugins
 
 import (
+	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -36,16 +38,7 @@ func admitTestPublication(t *testing.T, service *kvstoreServiceImpl, generation,
 
 func testCommit(t *testing.T, generation, token, track string) []byte {
 	t.Helper()
-	write := publicationWrite{Key: "lyrics:v5:source:lrclib:" + track, Value: []byte("snapshot"), TTL: 300}
-	digest := publicationDigest([]publicationWrite{write}, track, true)
-	batch := publicationCommitRequest{
-		Version: publicationVersion, Generation: generation, Token: token, Track: track,
-		Scope: "scope", Revision: publicationRevision(generation, track, digest),
-		SnapshotDigest: digest, Complete: true, Writes: []publicationWrite{write},
-	}
-	raw, err := json.Marshal(batch)
-	require.NoError(t, err)
-	return raw
+	return testAggregateCommit(t, generation, token, track, false, 0)
 }
 
 func TestPublicationAdmissionRejectsSupersededWriter(t *testing.T) {
@@ -405,4 +398,53 @@ func TestCommittedForegroundDoesNotBlockSweeps(t *testing.T) {
 
 	sweep := admitTestPublication(t, service, "generation-1", track, "sweep", "sweep")
 	require.True(t, sweep.Accepted, "a committed foreground admission blocked the sweep")
+}
+
+func TestAdmissionPolicyIgnoresAStaleGenerationRow(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	admission := admitTestPublication(t, service, "generation-1", track, "classic", "classic")
+	require.True(t, admission.Accepted)
+	_, err := service.db.ExecContext(t.Context(), `
+		UPDATE plugin_publication_admissions
+		SET generation='old-generation', state='active', expires_at=datetime('now','+30 minutes')
+		WHERE track_key=?`, track)
+	require.NoError(t, err)
+
+	sweep := admitTestPublication(t, service, "generation-1", track, "sweep", "sweep")
+	require.True(t, sweep.Accepted, "a stale-generation active row blocked the live generation")
+}
+
+func TestPublicationSchemaUpgradesFromPreviousVersion(t *testing.T) {
+	folder := t.TempDir()
+	track := "track-1"
+	service := newPublicationTestService(t, folder, "generation-1")
+	admission := admitTestPublication(t, service, "generation-1", track, "classic", "classic")
+	require.True(t, admission.Accepted)
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", admission.Token, track, true, 0)))
+	require.NoError(t, service.Close())
+
+	db, err := sql.Open("sqlite3", filepath.Join(folder, "plugins", "publication_test", "kvstore.db")+"?_busy_timeout=5000&_journal_mode=WAL")
+	require.NoError(t, err)
+	_, err = db.Exec(`ALTER TABLE plugin_publication_state DROP COLUMN generation`)
+	require.NoError(t, err)
+	_, err = db.Exec(`PRAGMA user_version = 6`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	// Reopening applies migration 7 and makes the old row invisible to the
+	// new generation while leaving the legacy row in place.
+	reloaded := newPublicationTestService(t, folder, "generation-2")
+	_, exists, err := reloaded.Get(t.Context(), publicationState+track)
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	next := admitTestPublication(t, reloaded, "generation-2", track, "classic", "next")
+	require.True(t, next.Accepted)
+	require.NoError(t, reloaded.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-2", next.Token, track, false, 0)))
+	_, exists, err = reloaded.Get(t.Context(), publicationState+track)
+	require.NoError(t, err)
+	require.True(t, exists)
 }

@@ -646,7 +646,8 @@ generation, admission and state records.
   are not returned. `@navidrome/publication/active` exposes the current
   generation. Admissions are generation-bound: a reload retires every
   admission minted by the old generation, so stale tokens cannot commit and
-  active tails cannot block the reloaded host.
+  active tails cannot block the reloaded host. State is process-scoped: a
+  reload mints a new generation, and old rows are ignored rather than reused.
 
 The host admits a refresh before the plugin is called so an older sweep can no
 longer publish even before the refresh commits. A task continuation carries
