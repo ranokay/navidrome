@@ -218,3 +218,27 @@ func TestHostAdmittedRefreshAcceptsPluginScope(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, service.commitPublication(t.Context(), track, raw))
 }
+
+func TestPluginMintedEmptyScopeCannotCommit(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	request, err := json.Marshal(publicationAdmissionRequest{
+		Version: publicationVersion, Action: "admit", RequestID: "call",
+		Generation: "generation-1", Track: track, Kind: "refresh",
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.SetWithTTL(t.Context(), publicationAdmissionPrefix+track, request, 1800))
+	rawAdmission, exists, err := service.Get(t.Context(), publicationAdmissionPrefix+track)
+	require.NoError(t, err)
+	require.True(t, exists)
+	var admission publicationAdmissionResponse
+	require.NoError(t, json.Unmarshal(rawAdmission, &admission))
+	require.True(t, admission.Accepted)
+	raw := testCommit(t, "generation-1", admission.Token, track)
+	var batch publicationCommitRequest
+	require.NoError(t, json.Unmarshal(raw, &batch))
+	batch.Scope = "plugin-scope"
+	raw, err = json.Marshal(batch)
+	require.NoError(t, err)
+	require.Error(t, service.commitPublication(t.Context(), track, raw))
+}
