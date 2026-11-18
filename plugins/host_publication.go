@@ -232,7 +232,7 @@ func (s *kvstoreServiceImpl) admitPublication(ctx context.Context, track string,
 	case "release":
 		return s.releaseAdmission(ctx, track, request, current, exists)
 	case "resume":
-		if !exists || current.Generation != request.Generation || current.Token != request.Token || current.Scope != request.Scope || current.State == "released" {
+		if !exists || current.Generation != request.Generation || current.Token != request.Token || (current.Scope != "" && current.Scope != request.Scope) || current.State == "released" {
 			return fmt.Errorf("%w: stale admission", errPublicationRejected)
 		}
 		return nil
@@ -430,7 +430,7 @@ func (s *kvstoreServiceImpl) applyCommitTx(ctx context.Context, tx *sql.Tx, trac
 	if err != nil {
 		return err
 	}
-	if token != batch.Token || scope != batch.Scope || state == "released" || valid != 1 {
+	if token != batch.Token || (scope != "" && scope != batch.Scope) || state == "released" || valid != 1 {
 		return fmt.Errorf("%w: stale admission", errPublicationRejected)
 	}
 	if err := s.checkCommitQuota(ctx, tx, batch.Writes); err != nil {
