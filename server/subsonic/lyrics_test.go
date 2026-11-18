@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/navidrome/navidrome/conf"
-	"github.com/navidrome/navidrome/conf/configtest"
 	"github.com/navidrome/navidrome/core/lyrics"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/model/request"
@@ -30,8 +29,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 			MockedMediaFile: mockRepo,
 		}
 		router = New(ds, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, lyrics.NewLyrics(ds, nil), nil, nil)
-		DeferCleanup(configtest.SetupConfig())
-		conf.Server.LyricsPriority = "embedded,.lrc"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "embedded,.lrc" })
 	})
 
 	const syncedLyrics = "[00:18.80]We're no strangers to love\n[00:22.801]You know the rules and so do I"
@@ -211,7 +209,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 	})
 
 	It("lists all configured local sources without a plugin system, preserving legacy priority", func() {
-		conf.Server.LyricsPriority = ".lrc,embedded,.ttml"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = ".lrc,embedded,.ttml" })
 		fixturesDir, err := filepath.Abs("tests/fixtures")
 		Expect(err).NotTo(HaveOccurred())
 		mockRepo.SetData(model.MediaFiles{{
@@ -235,7 +233,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 	})
 
 	It("marks discovery as incomplete while serving local lyrics when another plugin fails", func() {
-		conf.Server.LyricsPriority = "embedded,IndependentPlugin"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "embedded,IndependentPlugin" })
 		mockRepo.SetData(model.MediaFiles{{
 			ID: "1", Lyrics: `[{"lang":"eng","line":[{"value":"Local words"}]}]`,
 		}})
@@ -252,7 +250,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 	})
 
 	DescribeTable("keeps provider diagnostics private on lyrics failure", func(query string, legacy bool) {
-		conf.Server.LyricsPriority = "Unavailable"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "Unavailable" })
 		mockRepo.SetData(model.MediaFiles{{ID: "1", Artist: "Artist", Title: "Song"}})
 		for _, diagnostic := range []struct {
 			name    string
@@ -316,7 +314,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 	)
 
 	It("serves local lyrics with the longest failed provider cooldown without exposing error messages", func() {
-		conf.Server.LyricsPriority = "LongCooldown,ShortCooldown,embedded"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "LongCooldown,ShortCooldown,embedded" })
 		mockRepo.SetData(model.MediaFiles{{
 			ID: "1", Lyrics: `[{"lang":"eng","line":[{"value":"Local words"}]}]`,
 		}})
@@ -355,7 +353,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 	})
 
 	DescribeTable("returns only recognized, valid retry durations for incomplete discovery", func(message string, seconds int) {
-		conf.Server.LyricsPriority = "embedded,Unavailable"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "embedded,Unavailable" })
 		mockRepo.SetData(model.MediaFiles{{
 			ID: "1", Lyrics: `[{"lang":"eng","line":[{"value":"Local words"}]}]`,
 		}})
@@ -379,7 +377,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 	)
 
 	It("omits discovery status and cooldown fields without plugin failures or a plugin system", func() {
-		conf.Server.LyricsPriority = "embedded"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "embedded" })
 		mockRepo.SetData(model.MediaFiles{{
 			ID: "1", Lyrics: `[{"lang":"eng","line":[{"value":"Local words"}]}]`,
 		}})
@@ -435,7 +433,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 	})
 
 	It("should return multilingual TTML sidecar lyrics", func() {
-		conf.Server.LyricsPriority = ".ttml,embedded"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = ".ttml,embedded" })
 		r := newGetRequest("id=1")
 
 		fixturesDir, err := filepath.Abs("tests/fixtures")
@@ -494,7 +492,7 @@ var _ = Describe("GetLyricsBySongId", func() {
 	})
 
 	It("should return metadata-linked translation and pronunciation tracks from TTML", func() {
-		conf.Server.LyricsPriority = ".ttml,embedded"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = ".ttml,embedded" })
 		r := newGetRequest("id=1&enhanced=true")
 
 		fixturesDir, err := filepath.Abs("tests/fixtures")

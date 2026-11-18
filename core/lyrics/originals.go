@@ -22,7 +22,7 @@ const (
 func (l *lyricsService) pluginPatterns() []string {
 	patterns := make([]string, 0, maxVariantPlugins)
 	seen := make(map[string]bool, maxVariantPlugins)
-	for pattern := range strings.SplitSeq(conf.Server.LyricsPriority, ",") {
+	for pattern := range strings.SplitSeq(conf.Server().LyricsPriority, ",") {
 		pattern = strings.TrimSpace(pattern)
 		if pattern == "" || isLocalSource(pattern) || seen[pattern] {
 			continue

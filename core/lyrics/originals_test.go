@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/navidrome/navidrome/conf"
-	"github.com/navidrome/navidrome/conf/configtest"
 	"github.com/navidrome/navidrome/core/lyrics"
 	"github.com/navidrome/navidrome/model"
 	. "github.com/onsi/ginkgo/v2"
@@ -63,8 +62,7 @@ var _ = Describe("Lyrics variants and originals", func() {
 	var selection string
 
 	BeforeEach(func() {
-		DeferCleanup(configtest.SetupConfig())
-		conf.Server.LyricsPriority = "orig-plugin"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "orig-plugin" })
 		identity = model.LyricsVariantIdentity{
 			Version: 1, Instance: "plugin:0123456789abcdef0123456789abcdef",
 			Recording: "rec-1", Role: "main", Format: "lrc",
@@ -100,7 +98,7 @@ var _ = Describe("Lyrics variants and originals", func() {
 		variant := model.LyricsVariant{PluginID: "orig-plugin", Identity: identity, Selection: selection}
 		optional := &optionalLyricsProvider{variants: []model.LyricsVariant{variant, variant}}
 		standard := &standardOnlyProvider{list: model.LyricList{{Lang: "xxx"}}}
-		conf.Server.LyricsPriority = "orig-plugin,standard-only,embedded"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "orig-plugin,standard-only,embedded" })
 		svc := lyrics.NewLyrics(nil, &staticLoader{providers: map[string]lyrics.Provider{
 			"orig-plugin":   optional,
 			"standard-only": standard,
@@ -114,7 +112,7 @@ var _ = Describe("Lyrics variants and originals", func() {
 	})
 
 	It("bounds the global listing deterministically", func() {
-		conf.Server.LyricsPriority = "orig-plugin"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "orig-plugin" })
 		provider := &optionalLyricsProvider{}
 		for index := 0; index < model.MaxLyricsVariants+5; index++ {
 			candidate := identity
@@ -154,7 +152,7 @@ var _ = Describe("Lyrics variants and originals", func() {
 	})
 
 	It("reports unsupported plugins as unavailable without failing", func() {
-		conf.Server.LyricsPriority = "standard-only"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "standard-only" })
 		svc := lyrics.NewLyrics(nil, &staticLoader{providers: map[string]lyrics.Provider{
 			"standard-only": &standardOnlyProvider{list: model.LyricList{{Lang: "xxx"}}},
 		}})

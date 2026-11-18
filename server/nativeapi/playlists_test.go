@@ -11,7 +11,6 @@ import (
 	"github.com/deluan/rest"
 	"github.com/go-chi/chi/v5"
 	"github.com/navidrome/navidrome/conf"
-	"github.com/navidrome/navidrome/conf/configtest"
 	"github.com/navidrome/navidrome/consts"
 	"github.com/navidrome/navidrome/core/auth"
 	"github.com/navidrome/navidrome/core/playlists"
@@ -24,16 +23,13 @@ import (
 )
 
 var _ = Describe("Playlist Image Endpoints", func() {
-	BeforeEach(func() {
-		DeferCleanup(configtest.SetupConfig())
-	})
 
 	DescribeTable("uploadPlaylistImage guard",
 		func(enableArtworkUpload, isAdmin bool, expectedStatus int) {
-			conf.Server.EnableArtworkUpload = enableArtworkUpload
+			conf.Update(func(c *conf.Options) { c.EnableArtworkUpload = enableArtworkUpload })
 			handler := uploadPlaylistImage(&mockPlaylistsService{})
 
-			req := httptest.NewRequest("POST", "/playlist/pls-1/image", nil)
+			req := httptest.NewRequest(http.MethodPost, "/playlist/pls-1/image", nil)
 			ctx := request.WithUser(GinkgoT().Context(), model.User{ID: "user-1", IsAdmin: isAdmin})
 			req = req.WithContext(ctx)
 
@@ -49,10 +45,10 @@ var _ = Describe("Playlist Image Endpoints", func() {
 
 	DescribeTable("deletePlaylistImage guard",
 		func(enableArtworkUpload, isAdmin bool, expectedStatus int) {
-			conf.Server.EnableArtworkUpload = enableArtworkUpload
+			conf.Update(func(c *conf.Options) { c.EnableArtworkUpload = enableArtworkUpload })
 			handler := deletePlaylistImage(&mockPlaylistsService{})
 
-			req := httptest.NewRequest("DELETE", "/playlist/pls-1/image", nil)
+			req := httptest.NewRequest(http.MethodDelete, "/playlist/pls-1/image", nil)
 			ctx := request.WithUser(GinkgoT().Context(), model.User{ID: "user-1", IsAdmin: isAdmin})
 			req = req.WithContext(ctx)
 
@@ -76,9 +72,10 @@ var _ = Describe("Playlist Tracks Endpoint", func() {
 	)
 
 	BeforeEach(func() {
-		DeferCleanup(configtest.SetupConfig())
-		conf.Server.EnableSharing = false
-		conf.Server.SessionTimeout = time.Minute
+		conf.Update(func(c *conf.Options) {
+			c.EnableSharing = false
+			c.SessionTimeout = time.Minute
+		})
 
 		plsSvc = &mockPlaylistsService{}
 		userRepo = tests.CreateMockUserRepo()
@@ -191,7 +188,7 @@ var _ = Describe("handleExportPlaylist", func() {
 			playlist: &model.Playlist{ID: "pls-1", Name: name},
 		}))
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, httptest.NewRequest("GET", "/playlist/pls-1", nil))
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/playlist/pls-1", nil))
 		return w
 	}
 

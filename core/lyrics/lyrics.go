@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/Masterminds/squirrel"
@@ -11,12 +12,20 @@ import (
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/persistence"
+	"github.com/navidrome/navidrome/utils/cache"
+	"golang.org/x/sync/singleflight"
 )
 
 // maxLegacyLyricsCandidates bounds the duplicate window scanned by the legacy
 // artist/title lookup, so source-priority resolution can still reach older
 // matches without turning it into an unbounded table scan.
 const maxLegacyLyricsCandidates = 10
+
+const (
+	lyricsCacheSize   = 1000
+	lyricsCacheTTL    = 5 * time.Minute
+	lyricsLoadTimeout = time.Minute
+)
 
 // Provider fetches lyrics for a single media file. It is the contract
 // implemented by individual lyrics sources, such as plugins.
@@ -69,16 +78,42 @@ type PluginLoader interface {
 type lyricsService struct {
 	ds           model.DataStore
 	pluginLoader PluginLoader
+	pluginCache  cache.SimpleCache[pluginKey, model.LyricList]
+	pluginOnce   sync.Once
+	// detailedLoads collapses concurrent detailed lookups. Detailed results are
+	// not retained: a provider can improve them after the response (for example
+	// from a background sweep), and clients poll them for upgrades.
+	detailedLoads singleflight.Group
+}
+
+// pluginCacheFor lazily starts the legacy cache. Detailed-only callers should not
+// pay for the cache's background goroutine.
+func (l *lyricsService) pluginCacheFor() cache.SimpleCache[pluginKey, model.LyricList] {
+	l.pluginOnce.Do(func() {
+		l.pluginCache = cache.NewSimpleCache[pluginKey, model.LyricList](cache.Options{
+			SizeLimit:  lyricsCacheSize,
+			DefaultTTL: lyricsCacheTTL,
+		})
+	})
+	return l.pluginCache
+}
+
+type pluginKey struct {
+	plugin      string
+	mediaFileID string
 }
 
 // NewLyrics creates a new lyrics service. pluginLoader may be nil if no plugin
 // system is available.
 func NewLyrics(ds model.DataStore, pluginLoader PluginLoader) Lyrics {
-	return &lyricsService{ds: ds, pluginLoader: pluginLoader}
+	return &lyricsService{
+		ds:           ds,
+		pluginLoader: pluginLoader,
+	}
 }
 
 // GetLyrics returns lyrics for the given media file, trying sources in the
-// order specified by conf.Server.LyricsPriority.
+// order specified by conf.Server().LyricsPriority.
 func (l *lyricsService) GetLyrics(ctx context.Context, mf *model.MediaFile) (model.LyricList, error) {
 	return l.getLyricsForCandidates(ctx, []*model.MediaFile{mf})
 }
@@ -98,7 +133,7 @@ func (l *lyricsService) GetLyricsVariantsResult(ctx context.Context, mf *model.M
 	}
 	patterns := []string{}
 	seen := map[string]bool{}
-	for pattern := range strings.SplitSeq(conf.Server.LyricsPriority, ",") {
+	for pattern := range strings.SplitSeq(conf.Server().LyricsPriority, ",") {
 		pattern = strings.TrimSpace(pattern)
 		if pattern != "" && !seen[pattern] {
 			patterns = append(patterns, pattern)
@@ -235,7 +270,7 @@ func songsByArtistTitleWithLyricsFirst(artist, title string) model.QueryOptions 
 
 func (l *lyricsService) getLyricsForCandidates(ctx context.Context, mediaFiles []*model.MediaFile) (model.LyricList, error) {
 	var pluginErr error
-	for pattern := range strings.SplitSeq(conf.Server.LyricsPriority, ",") {
+	for pattern := range strings.SplitSeq(conf.Server().LyricsPriority, ",") {
 		pattern = strings.TrimSpace(pattern)
 		if pattern == "" {
 			continue

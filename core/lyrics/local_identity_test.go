@@ -52,9 +52,11 @@ func TestEmbeddedVariantGetsStableHostIdentity(t *testing.T) {
 }
 
 func TestLocalVariantsDistinguishFormats(t *testing.T) {
-	previous := conf.Server.LyricsPriority
-	conf.Server.LyricsPriority = "embedded"
-	t.Cleanup(func() { conf.Server.LyricsPriority = previous })
+	previous := conf.Server().LyricsPriority
+	conf.Update(func(c *conf.Options) { c.LyricsPriority = "embedded" })
+	t.Cleanup(func() {
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = previous })
+	})
 
 	mf := embeddedMediaFile(t, "track-sidecar")
 	embedded := LocalVariants(context.Background(), mf)

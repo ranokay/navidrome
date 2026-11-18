@@ -61,9 +61,7 @@ var _ = Describe("Criteria", func() {
 	"offset": 10
 }
 `))
-			if err != nil {
-				panic(err)
-			}
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			jsonObj = b.String()
 		})
 		It("marshals to JSON", func() {
@@ -423,4 +421,16 @@ var _ = Describe("Criteria", func() {
 			gomega.Expect(ids).To(gomega.Equal([]string{sharedID}))
 		})
 	})
+
+	DescribeTable("empty nested groups",
+		func(input, expected string) {
+			var c Criteria
+			gomega.Expect(json.Unmarshal([]byte(input), &c)).To(gomega.Succeed())
+			out, err := json.Marshal(c)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(string(out)).To(gomega.Equal(expected))
+		},
+		Entry("keeps a nested empty group", `{"all":[{"all":[]}]}`, `{"all":[{"all":[]}]}`),
+		Entry("keeps a nested empty any group", `{"all":[{"any":[]}]}`, `{"all":[{"any":[]}]}`),
+	)
 })

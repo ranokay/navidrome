@@ -12,7 +12,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/navidrome/navidrome/conf"
-	"github.com/navidrome/navidrome/conf/configtest"
 	"github.com/navidrome/navidrome/core/lyrics"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/model/request"
@@ -74,8 +73,7 @@ var _ = Describe("Lyrics personal preferences", func() {
 	}
 
 	BeforeEach(func() {
-		DeferCleanup(configtest.SetupConfig())
-		conf.Server.LyricsPriority = "embedded"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "embedded" })
 		props = &tests.MockedUserPropsRepo{}
 		repo = &mockedMediaFile{MockMediaFileRepo: tests.MockMediaFileRepo{}}
 		mediaFile = embeddedFile(trackID)
@@ -130,7 +128,7 @@ var _ = Describe("Lyrics personal preferences", func() {
 
 	It("retains a disappeared local choice, does not select a sibling, and recovers it", func() {
 		dir := GinkgoT().TempDir()
-		conf.Server.LyricsPriority = "embedded,.lrc"
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "embedded,.lrc" })
 		Expect(os.WriteFile(filepath.Join(dir, "song.lrc"), []byte("[00:01.00]sidecar line\n"), 0o600)).To(Succeed())
 		mediaFile.LibraryPath = dir
 		mediaFile.Path = "song.mp3"

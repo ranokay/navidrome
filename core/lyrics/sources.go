@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/core/storage"
@@ -77,43 +78,107 @@ func fromExternalFile(ctx context.Context, mf *model.MediaFile, suffix string) (
 		})), nil
 }
 
+// fromPlugin attempts to load legacy lyrics from a plugin with the given name.
+// Results are cached, misses included: legacy clients ask for every track in a
+// queue, and plugin lookups are slow.
+func (l *lyricsService) fromPlugin(ctx context.Context, mf *model.MediaFile, pluginName string) (model.LyricList, error) {
+	if l.pluginLoader == nil {
+		log.Debug(ctx, "Invalid lyric source", "source", pluginName)
+		return nil, nil
+	}
+
+	provider, ok := l.pluginLoader.LoadLyricsProvider(pluginName)
+	if !ok {
+		log.Warn(ctx, "Lyrics plugin not found", "plugin", pluginName)
+		return nil, nil
+	}
+
+	key := pluginKey{plugin: pluginName, mediaFileID: mf.ID}
+	list, err := l.pluginCacheFor().GetWithLoader(key, func(pluginKey) (model.LyricList, time.Duration, error) {
+		// Concurrent callers share one load, so one cancelled request must not abort it for the others.
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lyricsLoadTimeout)
+		defer cancel()
+		lyricsList, err := provider.GetLyrics(loadCtx, mf)
+		if err != nil {
+			log.Error(ctx, "Error getting lyrics from plugin", "plugin", pluginName, err)
+			return nil, 0, err
+		}
+		if len(lyricsList) > 0 {
+			log.Trace(ctx, "Retrieved lyrics from plugin", "plugin", pluginName, "count", len(lyricsList))
+		}
+		return lyricsList, 0, nil
+	})
+	if err != nil {
+		return nil, unwrapLyricsCacheError(err)
+	}
+	return list, nil
+}
+
+// fromPluginResult resolves one plugin source. Legacy lookups use the bounded
+// upstream cache. Detailed lookups are single-flight but not retained: the
+// provider can improve them after responding (for example from a background
+// sweep), and enhanced clients poll for upgrades.
 func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFile, pluginName string, detailed bool) (model.LyricsResult, error) {
+	pluginSource := model.LyricsSource{Type: model.LyricsSourcePlugin, Name: pluginName}
+	if !detailed {
+		list, err := l.fromPlugin(ctx, mf, pluginName)
+		if err != nil {
+			return model.LyricsResult{}, err
+		}
+		return model.LyricsResult{Lyrics: withLyricsSource(list, pluginSource)}, nil
+	}
+
 	if l.pluginLoader == nil {
 		log.Debug(ctx, "Invalid lyric source", "source", pluginName)
 		return model.LyricsResult{}, nil
 	}
-
 	provider, ok := l.pluginLoader.LoadLyricsProvider(pluginName)
 	if !ok {
 		log.Warn(ctx, "Lyrics plugin not found", "plugin", pluginName)
 		return model.LyricsResult{}, nil
 	}
 
-	var result model.LyricsResult
-	var err error
-	if detailed {
-		if resultProvider, ok := provider.(DetailedResultProvider); ok {
-			result, err = resultProvider.GetLyricsDetailedResult(ctx, mf)
-		} else if detailedProvider, ok := provider.(DetailedProvider); ok {
-			result.Lyrics, err = detailedProvider.GetLyricsDetailed(ctx, mf)
-		} else {
-			result.Lyrics, err = provider.GetLyrics(ctx, mf)
-		}
-	} else {
-		result.Lyrics, err = provider.GetLyrics(ctx, mf)
-	}
+	key := pluginName + "\x00" + mf.ID
+	value, err, _ := l.detailedLoads.Do(key, func() (any, error) {
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lyricsLoadTimeout)
+		defer cancel()
+		return loadDetailedResult(loadCtx, provider, mf)
+	})
 	if err != nil {
 		return model.LyricsResult{}, err
 	}
-
+	result := value.(model.LyricsResult)
 	if len(result.Lyrics) > 0 {
 		log.Trace(ctx, "Retrieved lyrics from plugin", "plugin", pluginName, "count", len(result.Lyrics))
 	}
-	result.Lyrics = withLyricsSource(result.Lyrics, model.LyricsSource{
-		Type: model.LyricsSourcePlugin,
-		Name: pluginName,
-	})
+	result.Lyrics = withLyricsSource(result.Lyrics, pluginSource)
 	return result, nil
+}
+
+func loadDetailedResult(ctx context.Context, provider Provider, mf *model.MediaFile) (model.LyricsResult, error) {
+	if resultProvider, ok := provider.(DetailedResultProvider); ok {
+		return resultProvider.GetLyricsDetailedResult(ctx, mf)
+	}
+	if detailedProvider, ok := provider.(DetailedProvider); ok {
+		list, err := detailedProvider.GetLyricsDetailed(ctx, mf)
+		return model.LyricsResult{Lyrics: list}, err
+	}
+	list, err := provider.GetLyrics(ctx, mf)
+	return model.LyricsResult{Lyrics: list}, err
+}
+
+// The cache shares loader errors without retaining them, but wraps them with a
+// transport prefix. Restore the provider's original error so callers and the
+// Subsonic retry parser see the same identity and message as an uncached call.
+func unwrapLyricsCacheError(err error) error {
+	const prefix = "cache error: loader returned "
+	if err == nil || !strings.HasPrefix(err.Error(), prefix) {
+		return err
+	}
+	if unwrapped := errors.Unwrap(err); unwrapped != nil {
+		return unwrapped
+	}
+	return err
 }
 
 // withLocalIdentity stamps one host-issued identity on every entry of a local
@@ -181,7 +246,7 @@ func LocalVariants(ctx context.Context, mf *model.MediaFile) []model.LyricsLocal
 			identities = append(identities, *lyric.Local)
 		}
 	}
-	for pattern := range strings.SplitSeq(conf.Server.LyricsPriority, ",") {
+	for pattern := range strings.SplitSeq(conf.Server().LyricsPriority, ",") {
 		pattern = strings.TrimSpace(pattern)
 		if !isLocalSource(pattern) {
 			continue

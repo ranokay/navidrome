@@ -2,6 +2,7 @@ package playlists
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -144,7 +145,7 @@ type pathResolution struct {
 // Format: "libraryID:relativePath" with forward slashes for path separators.
 func (r pathResolution) ToQualifiedString() (string, error) {
 	if !r.valid {
-		return "", fmt.Errorf("invalid path resolution")
+		return "", errors.New("invalid path resolution")
 	}
 	relativePath, err := filepath.Rel(r.libraryPath, r.absolutePath)
 	if err != nil {
@@ -242,7 +243,7 @@ func resolveImageURL(value string, folder *model.Folder, matcher *model.LibraryM
 
 	// HTTP(S) URLs — store as-is, but only if external album art is enabled
 	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
-		if !conf.Server.EnableM3UExternalAlbumArt {
+		if !conf.Server().EnableM3UExternalAlbumArt {
 			return ""
 		}
 		return value
