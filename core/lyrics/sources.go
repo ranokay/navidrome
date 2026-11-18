@@ -204,14 +204,11 @@ func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFil
 				}
 				return model.LyricsResult{}, loadErr
 			}
-			if supported {
-				return loaded, nil
-			}
-			if refresh && refreshPublication.Generation != "" {
+			// The adapter's fallback result is authoritative when the optional
+			// export is unsupported; the caller never repeats the v1 lookup.
+			if !supported && refresh && refreshPublication.Generation != "" {
 				_ = publication.AbortPublication(context.WithoutCancel(loadCtx), mf, refreshPublication)
 			}
-			// The adapter already returned the required v1 result; do not repeat
-			// the provider call for an old plugin.
 			return loaded, nil
 		}
 		return loadDetailedResult(loadCtx, provider, mf)

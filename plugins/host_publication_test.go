@@ -192,3 +192,11 @@ func TestPublicationRejectsTamperedSnapshotDigest(t *testing.T) {
 	require.NoError(t, err)
 	require.Error(t, service.commitPublication(t.Context(), track, raw))
 }
+
+func TestPublicationDigestCanonicalForm(t *testing.T) {
+	write := publicationWrite{Key: "lyrics:v5:source:lrclib:track-1", Value: []byte("snapshot"), TTL: 300}
+	const expected = "e949adc58a9ca6d01ab4ea216421e10af619a14e2b2946153e7cda4937b3131b"
+	if got := publicationDigest([]publicationWrite{write}, "track-1", true); got != expected {
+		t.Fatalf("publicationDigest = %s, want %s", got, expected)
+	}
+}
