@@ -642,7 +642,8 @@ generation, admission and state records.
   completion record, and rolls the whole batch back on quota, size, TTL or
   scope failure.
 - `@navidrome/publication/state:<track>`: read the committed `generation`,
-  `scope`, `revision`, completion and `expiresAt` (absolute Unix seconds).
+  `scope`, `revision`, completion and `expiresAt` (absolute Unix seconds, the
+  completion record's expiry, not the expiry of the published rows).
   Rows from a different live generation are not returned. `@navidrome/publication/active` exposes the current
   generation. Admissions are generation-bound: a reload retires every
   admission minted by the old generation, so stale tokens cannot commit and
@@ -650,13 +651,17 @@ generation, admission and state records.
   reload mints a new generation, and old rows are ignored rather than reused.
 - `@navidrome/publication/control:<key>`: atomically raise a normal scalar
   `key` to an integer `{value, ttl}` maximum and extend its TTL. `value` must
-  be positive and `ttl` at most 24 hours. Cooldown and failure observations
-  use this path; the target must not be reserved or use a discovery prefix.
-  A permanent target stays permanent. Read the target key for the merged
-  value.
-- A commit consumes its admission: `resume` and `commit` require the admission
-  state to be `active`. After a terminal commit the token cannot be replayed;
-  use `state:<track>` to confirm a response whose commit reply was lost.
+  be positive; `ttl` is in seconds, must be positive and at most 24 hours, and
+  must cover the value's intended lifetime. Merges are subject to the plugin
+  storage quota. Cooldown and failure observations use this path; the target
+  must not be reserved, `lyrics:v5:` or `sweep-done:`, and a permanent target
+  stays permanent. Only targets written exclusively through this path are
+  monotonic. Read the target key for the merged value; a missing, expired or
+  non-integer target starts from zero.
+- A terminal commit consumes its admission: `resume` and `commit` require the
+  admission state to be `active`. An `awaitTail` commit keeps it active for the
+  tail. After a terminal commit the token cannot be replayed; use
+  `state:<track>` to confirm a response whose commit reply was lost.
 
 The host admits a refresh before the plugin is called so an older sweep can no
 longer publish even before the refresh commits. A task continuation carries
