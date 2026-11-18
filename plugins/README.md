@@ -642,12 +642,19 @@ generation, admission and state records.
   completion record, and rolls the whole batch back on quota, size, TTL or
   scope failure.
 - `@navidrome/publication/state:<track>`: read the committed `generation`,
-  `scope`, `revision` and completion. Rows from a different live generation
-  are not returned. `@navidrome/publication/active` exposes the current
+  `scope`, `revision`, completion and `expiresAt` (absolute Unix seconds).
+  Rows from a different live generation are not returned. `@navidrome/publication/active` exposes the current
   generation. Admissions are generation-bound: a reload retires every
   admission minted by the old generation, so stale tokens cannot commit and
   active tails cannot block the reloaded host. State is process-scoped: a
   reload mints a new generation, and old rows are ignored rather than reused.
+- `@navidrome/publication/control:<key>`: atomically raise a normal scalar
+  `key` to an integer `{value, ttl}` maximum and extend its TTL. Cooldown and
+  failure observations use this path; the target must not be reserved or use
+  a discovery prefix. Read the target key for the merged value.
+- A commit consumes its admission: `resume` and `commit` require the admission
+  state to be `active`. After a terminal commit the token cannot be replayed;
+  use `state:<track>` to confirm a response whose commit reply was lost.
 
 The host admits a refresh before the plugin is called so an older sweep can no
 longer publish even before the refresh commits. A task continuation carries
@@ -656,7 +663,8 @@ re-read the active key. Batches are limited to 64 writes, 16 MiB total, 1 MiB
 per value, allowed `lyrics:v5:`/`sweep-done:` prefixes containing the admitted
 track key, and the host's configured quota (the shipped lyrics plugin declares 32 MB) while
 leaving 1 MiB of control headroom where the quota permits. Cooldowns, salts, immutable originals
-and task markers remain separate control writes.
+and task markers remain separate control writes; capable hosts merge cooldown
+and failure scalars through the `control:` namespace.
 
 ### Storage
 

@@ -519,4 +519,25 @@ func TestPublicationControlMergeIsMonotonic(t *testing.T) {
 	request, err := json.Marshal(publicationControlMerge{Value: 1, TTL: 60})
 	require.NoError(t, err)
 	require.Error(t, service.SetWithTTL(t.Context(), publicationControlPrefix+publicationState+"x", request, 120))
+	require.Error(t, service.SetWithTTL(t.Context(), publicationControlPrefix, request, 120))
+	require.Error(t, service.SetWithTTL(t.Context(), publicationControlPrefix+"lyrics:v5:x", request, 120))
+
+	// An expired row must not contribute a larger value or a negative quota
+	// delta to the merge.
+	expired := "cooldown:expired"
+	_, err = service.db.ExecContext(t.Context(), `
+		INSERT INTO kvstore (key, value, size, created_at, updated_at, expires_at)
+		VALUES (?, '1000', 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, datetime('now','-1 minute'))`, expired)
+	require.NoError(t, err)
+	request, err = json.Marshal(publicationControlMerge{Value: 50, TTL: 60})
+	require.NoError(t, err)
+	require.NoError(t, service.SetWithTTL(t.Context(), publicationControlPrefix+expired, request, 120))
+	raw, exists, err := service.Get(t.Context(), expired)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.Equal(t, "50", string(raw))
+
+	bad, err := json.Marshal(publicationControlMerge{Value: 0, TTL: 0})
+	require.NoError(t, err)
+	require.Error(t, service.SetWithTTL(t.Context(), publicationControlPrefix+"cooldown:bad", bad, 120))
 }

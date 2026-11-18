@@ -215,7 +215,8 @@ func (s *kvstoreServiceImpl) handlePublicationSet(ctx context.Context, key strin
 		return s.commitPublication(ctx, track, value)
 	case strings.HasPrefix(key, publicationControlPrefix):
 		target := strings.TrimPrefix(key, publicationControlPrefix)
-		if target == "" || isPublicationKey(target) {
+		if target == "" || len(target) > maxKeyLength || isPublicationKey(target) ||
+			strings.HasPrefix(target, "lyrics:v5:") || strings.HasPrefix(target, "sweep-done:") {
 			return fmt.Errorf("%w: invalid control target", errPublicationRejected)
 		}
 		return s.mergeControl(ctx, target, value)
@@ -497,7 +498,9 @@ func (s *kvstoreServiceImpl) applyCommitTx(ctx context.Context, tx *sql.Tx, trac
 
 // mergeControl atomically raises a scalar KV record to the requested value.
 // Cooldown and failure state use it so concurrent capable-host writers cannot
-// shorten a newer deadline or erase a newer observation.
+// shorten a newer deadline or erase a newer observation. The TTL must cover
+// the value's intended lifetime; readers read the target key, not the control
+// request. Only writers using this path are merged.
 func (s *kvstoreServiceImpl) mergeControl(ctx context.Context, target string, payload []byte) error {
 	var request publicationControlMerge
 	if err := json.Unmarshal(payload, &request); err != nil || request.Value <= 0 ||
@@ -525,6 +528,10 @@ func (s *kvstoreServiceImpl) mergeControl(ctx context.Context, target string, pa
 		return err
 	}
 	newValue := request.Value
+	if valid != 1 {
+		// Expired rows must not offset the quota delta or contribute a value.
+		oldSize = 0
+	}
 	if valid == 1 && oldValue > newValue {
 		newValue = oldValue
 	}
