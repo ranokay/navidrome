@@ -13,12 +13,14 @@ import (
 )
 
 type refreshProvider struct {
-	calls     atomic.Int32
-	active    atomic.Int32
-	maxActive atomic.Int32
-	started   chan struct{}
-	release   chan struct{}
-	refresh   atomic.Int32
+	calls       atomic.Int32
+	active      atomic.Int32
+	maxActive   atomic.Int32
+	started     chan struct{}
+	release     chan struct{}
+	refresh     atomic.Int32
+	aborts      atomic.Int32
+	unsupported bool
 }
 
 func (p *refreshProvider) GetLyrics(context.Context, *model.MediaFile) (model.LyricList, error) {
@@ -56,10 +58,11 @@ func (p *refreshProvider) GetLyricsDetailedResultWithRefresh(ctx context.Context
 	<-p.release
 	p.active.Add(-1)
 	result, err := p.GetLyricsDetailedResult(ctx, mf)
-	return result, true, err
+	return result, !p.unsupported, err
 }
 
 func (p *refreshProvider) AbortPublication(context.Context, *model.MediaFile, model.LyricsPublication) error {
+	p.aborts.Add(1)
 	return nil
 }
 
@@ -137,4 +140,25 @@ func TestDetailedRefreshWaitsForNormalAndNormalJoinsRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	gomega.NewWithT(t).Expect(p.maxActive.Load()).To(gomega.Equal(int32(1)))
+}
+
+func TestUnsupportedRefreshReleasesAdmission(t *testing.T) {
+	conf.Update(func(c *conf.Options) { c.LyricsPriority = "plugin" })
+	p := &refreshProvider{
+		started: make(chan struct{}, 1), release: make(chan struct{}, 1),
+		unsupported: true,
+	}
+	svc := lyrics.NewLyrics(nil, refreshLoader{provider: p})
+	mf := &model.MediaFile{ID: "track-1", Title: "Song", Artist: "Artist", Duration: 200}
+	go func() {
+		<-p.started
+		p.release <- struct{}{}
+	}()
+	_, err := svc.RefreshLyricsVariantsResult(t.Context(), mf, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.aborts.Load() != 1 {
+		t.Fatalf("aborts = %d, want the unsupported refresh admission released", p.aborts.Load())
+	}
 }

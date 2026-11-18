@@ -126,6 +126,9 @@ func randomPublicationToken(bytes int) string {
 	return hex.EncodeToString(value)
 }
 
+// publicationDigest is the canonical committed-snapshot digest: key, NUL,
+// value, NUL for each write in batch order, then the track key and one
+// completion byte. Keep this in sync with the plugin's publicationDigest.
 func publicationDigest(writes []publicationWrite, track string, complete bool) string {
 	hash := sha256.New()
 	for _, write := range writes {
