@@ -50,6 +50,7 @@ func (c *detailedCoordinator) do(ctx context.Context, key string, refresh bool, 
 		c.mu.Unlock()
 		if refresh && prepare != nil {
 			if err := prepare(); err != nil {
+				flight.err = err
 				c.mu.Lock()
 				delete(c.flights, key)
 				c.mu.Unlock()

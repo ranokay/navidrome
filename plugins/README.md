@@ -638,7 +638,8 @@ longer publish even before the refresh commits. A task continuation carries
 its original generation and token; it must resume that admission rather than
 re-read the active key. Batches are limited to 64 writes, 16 MiB total, 1 MiB
 per value, allowed `lyrics:v5:`/`sweep-done:` prefixes containing the admitted
-track key, and the existing 32 MB quota. Cooldowns, salts, immutable originals
+track key, and the host's configured quota (the shipped lyrics plugin declares 32 MB) while
+leaving 1 MiB of control headroom where the quota permits. Cooldowns, salts, immutable originals
 and task markers remain separate control writes.
 
 ### Storage

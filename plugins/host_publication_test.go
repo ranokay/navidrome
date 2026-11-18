@@ -148,3 +148,20 @@ func TestPublicationAdmissionResumeIsExact(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, service.admitPublication(t.Context(), track, resume))
 }
+
+func TestPublicationRejectsDuplicateWriteKeys(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	admission := admitTestPublication(t, service, "generation-1", track, "classic", "call")
+	require.True(t, admission.Accepted)
+	write := publicationWrite{Key: "lyrics:v5:source:lrclib:" + track, Value: []byte("snapshot"), TTL: 300}
+	digest := publicationDigestForTest([]publicationWrite{write, write}, "body", true)
+	batch := publicationCommitRequest{
+		Version: publicationVersion, Generation: "generation-1", Token: admission.Token, Track: track,
+		Scope: "scope", Revision: publicationRevision("generation-1", track, digest),
+		SnapshotDigest: digest, Complete: true, Writes: []publicationWrite{write, write},
+	}
+	raw, err := json.Marshal(batch)
+	require.NoError(t, err)
+	require.Error(t, service.commitPublication(t.Context(), track, raw))
+}

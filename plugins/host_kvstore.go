@@ -354,7 +354,7 @@ func (s *kvstoreServiceImpl) GetMany(ctx context.Context, keys []string) (map[st
 	if len(keys) == 0 {
 		return map[string][]byte{}, nil
 	}
-	keys = slices.DeleteFunc(keys, isPublicationKey)
+	keys = slices.DeleteFunc(slices.Clone(keys), isPublicationKey)
 
 	const batchSize = 200
 	result := make(map[string][]byte)

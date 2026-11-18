@@ -432,7 +432,11 @@ func (s *kvstoreServiceImpl) checkCommitQuota(ctx context.Context, tx *sql.Tx, w
 		}
 		delta += int64(len(write.Value)) - oldSize
 	}
-	if used+delta > s.maxSize-publicationReservedBytes {
+	budget := s.maxSize
+	if budget > publicationReservedBytes {
+		budget -= publicationReservedBytes
+	}
+	if used+delta > budget {
 		return fmt.Errorf("%w: storage limit", errPublicationRejected)
 	}
 	return nil
