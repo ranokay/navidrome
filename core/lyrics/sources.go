@@ -210,6 +210,9 @@ func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFil
 			if refresh && refreshPublication.Generation != "" {
 				_ = publication.AbortPublication(context.WithoutCancel(loadCtx), mf, refreshPublication)
 			}
+			// The adapter already returned the required v1 result; do not repeat
+			// the provider call for an old plugin.
+			return loaded, nil
 		}
 		return loadDetailedResult(loadCtx, provider, mf)
 	})
