@@ -232,7 +232,9 @@ func (s *kvstoreServiceImpl) admitPublication(ctx context.Context, track string,
 	case "release":
 		return s.releaseAdmission(ctx, track, request, current, exists)
 	case "resume":
-		if !exists || current.Generation != request.Generation || current.Token != request.Token || (current.Scope != "" && current.Scope != request.Scope) || current.State == "released" {
+		if !exists || current.Generation != request.Generation || current.Token != request.Token ||
+			(current.Scope == "" && current.Kind != "refresh") || (current.Scope != "" && current.Scope != request.Scope) ||
+			current.State == "released" {
 			return fmt.Errorf("%w: stale admission", errPublicationRejected)
 		}
 		return nil
@@ -418,19 +420,19 @@ func (s *kvstoreServiceImpl) applyCommitTx(ctx context.Context, tx *sql.Tx, trac
 	if generation == "" || generation != batch.Generation {
 		return fmt.Errorf("%w: generation changed", errPublicationRejected)
 	}
-	var token, state, scope string
+	var token, state, scope, kind string
 	var valid int
 	err = tx.QueryRowContext(ctx, `
-		SELECT token, state, scope, CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END
+		SELECT token, state, scope, kind, CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END
 		FROM plugin_publication_admissions WHERE track_key = ?
-	`, track).Scan(&token, &state, &scope, &valid)
+	`, track).Scan(&token, &state, &scope, &kind, &valid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: no admission", errPublicationRejected)
 	}
 	if err != nil {
 		return err
 	}
-	if token != batch.Token || (scope != "" && scope != batch.Scope) || state == "released" || valid != 1 {
+	if token != batch.Token || (scope == "" && kind != "refresh") || (scope != "" && scope != batch.Scope) || state == "released" || valid != 1 {
 		return fmt.Errorf("%w: stale admission", errPublicationRejected)
 	}
 	if err := s.checkCommitQuota(ctx, tx, batch.Writes); err != nil {

@@ -200,3 +200,21 @@ func TestPublicationDigestCanonicalForm(t *testing.T) {
 		t.Fatalf("publicationDigest = %s, want %s", got, expected)
 	}
 }
+
+func TestHostAdmittedRefreshAcceptsPluginScope(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	token, err := service.AdmitHost(t.Context(), "generation-1", track, "refresh", "host-call")
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+	write := publicationWrite{Key: "lyrics:v5:source:lrclib:" + track, Value: []byte("snapshot"), TTL: 300}
+	digest := publicationDigest([]publicationWrite{write}, track, true)
+	batch := publicationCommitRequest{
+		Version: publicationVersion, Generation: "generation-1", Token: token, Track: track,
+		Scope: "plugin-scope", Revision: publicationRevision("generation-1", track, digest),
+		SnapshotDigest: digest, Complete: true, Writes: []publicationWrite{write},
+	}
+	raw, err := json.Marshal(batch)
+	require.NoError(t, err)
+	require.NoError(t, service.commitPublication(t.Context(), track, raw))
+}
