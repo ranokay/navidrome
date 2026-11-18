@@ -165,3 +165,35 @@ func TestPublicationRejectsDuplicateWriteKeys(t *testing.T) {
 	require.NoError(t, err)
 	require.Error(t, service.commitPublication(t.Context(), track, raw))
 }
+
+func TestExpiredAdmissionIsAbsentAndResumeRejected(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	admission := admitTestPublication(t, service, "generation-1", track, "classic", "call")
+	require.True(t, admission.Accepted)
+	_, err := service.db.ExecContext(t.Context(), `UPDATE plugin_publication_admissions SET expires_at=datetime('now','-1 minute') WHERE track_key=?`, track)
+	require.NoError(t, err)
+	_, exists, err := service.Get(t.Context(), publicationAdmissionPrefix+track)
+	require.NoError(t, err)
+	require.False(t, exists)
+	has, err := service.Has(t.Context(), publicationAdmissionPrefix+track)
+	require.NoError(t, err)
+	require.False(t, has)
+	resume, err := json.Marshal(publicationAdmissionRequest{
+		Version: publicationVersion, Action: "resume", RequestID: "call",
+		Generation: "generation-1", Track: track, Kind: "classic", Token: admission.Token,
+	})
+	require.NoError(t, err)
+	require.Error(t, service.admitPublication(t.Context(), track, resume))
+}
+
+func TestGetManyIncludesPublicationRecords(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	admission := admitTestPublication(t, service, "generation-1", track, "classic", "call")
+	require.True(t, admission.Accepted)
+	values, err := service.GetMany(t.Context(), []string{publicationAdmissionPrefix + track, publicationActiveKey})
+	require.NoError(t, err)
+	require.Contains(t, values, publicationAdmissionPrefix+track)
+	require.Contains(t, values, publicationActiveKey)
+}

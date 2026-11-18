@@ -79,6 +79,9 @@ type OriginalsProvider interface {
 type PublicationProvider interface {
 	PublicationGeneration() string
 	StartPublication(ctx context.Context, mf *model.MediaFile, kind string) (model.LyricsPublication, bool, error)
+	// GetLyricsWithPublication returns supported=false together with the
+	// required v1 result when the optional classic-capable export is absent, so
+	// the caller never repeats the lookup.
 	GetLyricsWithPublication(ctx context.Context, mf *model.MediaFile, publication model.LyricsPublication) (model.LyricList, model.LyricsDiscovery, bool, error)
 	GetLyricsDetailedResultWithRefresh(ctx context.Context, mf *model.MediaFile, publication model.LyricsPublication, refresh bool) (model.LyricsResult, bool, error)
 	AbortPublication(ctx context.Context, mf *model.MediaFile, publication model.LyricsPublication) error

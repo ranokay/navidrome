@@ -207,6 +207,9 @@ func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFil
 			if supported {
 				return loaded, nil
 			}
+			if refresh && refreshPublication.Generation != "" {
+				_ = publication.AbortPublication(context.WithoutCancel(loadCtx), mf, refreshPublication)
+			}
 		}
 		return loadDetailedResult(loadCtx, provider, mf)
 	})
