@@ -3,6 +3,7 @@ package plugins
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/navidrome/navidrome/conf"
 	"github.com/stretchr/testify/require"
@@ -241,4 +242,100 @@ func TestPluginMintedEmptyScopeCannotCommit(t *testing.T) {
 	raw, err = json.Marshal(batch)
 	require.NoError(t, err)
 	require.Error(t, service.commitPublication(t.Context(), track, raw))
+}
+
+func testAggregateCommit(t *testing.T, generation, token, track string, awaitTail bool, snapshotExpiresAt int64) []byte {
+	t.Helper()
+	write := publicationWrite{Key: "lyrics:v5:source:lrclib:" + track, Value: []byte("snapshot"), TTL: 300}
+	digest := publicationDigest([]publicationWrite{write}, track, true)
+	batch := publicationCommitRequest{
+		Version: publicationVersion, Generation: generation, Token: token, Track: track,
+		Scope: "scope", Revision: publicationRevision(generation, track, digest),
+		SnapshotDigest: digest, Complete: true, AwaitTail: awaitTail,
+		SnapshotExpiresAt: snapshotExpiresAt,
+		Writes:            []publicationWrite{write},
+	}
+	raw, err := json.Marshal(batch)
+	require.NoError(t, err)
+	return raw
+}
+
+func TestPublicationStateRequiresActiveGeneration(t *testing.T) {
+	folder := t.TempDir()
+	generation := "generation-1"
+	service := newPublicationTestService(t, folder, generation)
+	track := "track-1"
+	admission := admitTestPublication(t, service, generation, track, "classic", "call")
+	require.True(t, admission.Accepted)
+	require.NoError(t, service.commitPublication(t.Context(), track, testAggregateCommit(t, generation, admission.Token, track, false, 0)))
+
+	raw, exists, err := service.Get(t.Context(), publicationState+track)
+	require.NoError(t, err)
+	require.True(t, exists)
+	var state publicationStateResponse
+	require.NoError(t, json.Unmarshal(raw, &state))
+	require.Equal(t, generation, state.Generation)
+	require.Equal(t, "scope", state.Scope)
+
+	// A reload mints a new generation: persisted state from the old generation
+	// is no longer authoritative even while its rows remain in the database.
+	reloaded := newPublicationTestService(t, folder, "generation-2")
+	_, exists, err = reloaded.Get(t.Context(), publicationState+track)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+func TestPublicationStateExpiryBoundedBySnapshotDependencies(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	admission := admitTestPublication(t, service, "generation-1", track, "classic", "call")
+	require.True(t, admission.Accepted)
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", admission.Token, track, false, time.Now().Unix()-1)))
+
+	// The published rows committed, but their reused dependency already
+	// expired, so the state claim must not outlive it.
+	_, exists, err := service.Get(t.Context(), publicationState+track)
+	require.NoError(t, err)
+	require.False(t, exists)
+	_, exists, err = service.Get(t.Context(), "lyrics:v5:source:lrclib:"+track)
+	require.NoError(t, err)
+	require.True(t, exists)
+}
+
+func TestCommittedRefreshDoesNotBlockForegroundWriters(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	refresh := admitTestPublication(t, service, "generation-1", track, "refresh", "refresh")
+	require.True(t, refresh.Accepted)
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", refresh.Token, track, false, 0)))
+
+	classic := admitTestPublication(t, service, "generation-1", track, "classic", "classic")
+	require.True(t, classic.Accepted, "a committed refresh must not block foreground work")
+}
+
+func TestAwaitTailRefreshKeepsAdmissionUntilReleased(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	refresh := admitTestPublication(t, service, "generation-1", track, "refresh", "refresh")
+	require.True(t, refresh.Accepted)
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", refresh.Token, track, true, 0)))
+
+	// The foreground committed but a tail still owns the write slot.
+	sweepRequest, err := json.Marshal(publicationAdmissionRequest{
+		Version: publicationVersion, Action: "admit", RequestID: "sweep",
+		Generation: "generation-1", Track: track, Scope: "scope", Kind: "sweep",
+	})
+	require.NoError(t, err)
+	require.Error(t, service.admitPublication(t.Context(), track, sweepRequest))
+
+	release, err := json.Marshal(publicationAdmissionRequest{
+		Version: publicationVersion, Action: "release", Generation: "generation-1",
+		Track: track, Token: refresh.Token,
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.admitPublication(t.Context(), track, release))
+	require.NoError(t, service.admitPublication(t.Context(), track, sweepRequest))
 }

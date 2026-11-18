@@ -65,21 +65,25 @@ type publicationWrite struct {
 }
 
 type publicationCommitRequest struct {
-	Version        int                `json:"version"`
-	Generation     string             `json:"generation"`
-	Token          string             `json:"token"`
-	Track          string             `json:"track"`
-	Scope          string             `json:"scope"`
-	Revision       string             `json:"revision"`
-	SnapshotDigest string             `json:"snapshotDigest"`
-	Complete       bool               `json:"complete"`
-	Writes         []publicationWrite `json:"writes"`
+	Version           int                `json:"version"`
+	Generation        string             `json:"generation"`
+	Token             string             `json:"token"`
+	Track             string             `json:"track"`
+	Scope             string             `json:"scope"`
+	Revision          string             `json:"revision"`
+	SnapshotDigest    string             `json:"snapshotDigest"`
+	SnapshotExpiresAt int64              `json:"snapshotExpiresAt,omitempty"`
+	Complete          bool               `json:"complete"`
+	AwaitTail         bool               `json:"awaitTail,omitempty"`
+	Writes            []publicationWrite `json:"writes"`
 }
 
 type publicationStateResponse struct {
-	Handled  bool   `json:"handled"`
-	Revision string `json:"revision,omitempty"`
-	Complete bool   `json:"complete,omitempty"`
+	Handled    bool   `json:"handled"`
+	Generation string `json:"generation,omitempty"`
+	Scope      string `json:"scope,omitempty"`
+	Revision   string `json:"revision,omitempty"`
+	Complete   bool   `json:"complete,omitempty"`
 }
 
 type publicationActiveResponse struct {
@@ -263,7 +267,7 @@ func admissionPolicy(kind string, current publicationAdmission, exists bool) err
 	if !exists || !current.Valid || kind == "refresh" {
 		return nil
 	}
-	if current.Kind == "refresh" || current.Kind == "tail" {
+	if (current.Kind == "refresh" || current.Kind == "tail") && current.State == "active" {
 		return fmt.Errorf("%w: refresh active", errPublicationRejected)
 	}
 	if (kind == "sweep" || kind == "tail") && (current.Kind == "classic" || current.Kind == "normal" || current.Kind == "original") {
@@ -331,19 +335,24 @@ func (s *kvstoreServiceImpl) admissionResponse(ctx context.Context, track string
 }
 
 func (s *kvstoreServiceImpl) stateResponse(ctx context.Context, track string) ([]byte, bool, error) {
-	var revision string
+	var generation, scope, revision string
 	var complete bool
 	err := s.db.QueryRowContext(ctx, `
-		SELECT revision, complete FROM plugin_publication_state
-		WHERE track_key = ? AND expires_at > CURRENT_TIMESTAMP
-	`, track).Scan(&revision, &complete)
+		SELECT state.generation, state.scope, state.revision, state.complete
+		FROM plugin_publication_state state
+		JOIN plugin_publication_generation active ON active.id = 1
+		WHERE state.track_key = ? AND state.expires_at > CURRENT_TIMESTAMP
+			AND state.generation = active.generation
+	`, track).Scan(&generation, &scope, &revision, &complete)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	value, err := json.Marshal(publicationStateResponse{Handled: true, Revision: revision, Complete: complete})
+	value, err := json.Marshal(publicationStateResponse{
+		Handled: true, Generation: generation, Scope: scope, Revision: revision, Complete: complete,
+	})
 	return value, err == nil, err
 }
 
@@ -445,7 +454,11 @@ func (s *kvstoreServiceImpl) applyCommitTx(ctx context.Context, tx *sql.Tx, trac
 	if err := writeCommitState(ctx, tx, track, batch); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE plugin_publication_admissions SET state='committed', expires_at=? WHERE track_key=?`, time.Now().Add(publicationTTL).UTC().Format("2006-01-02 15:04:05"), track)
+	admissionState := "committed"
+	if batch.AwaitTail {
+		admissionState = "active"
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE plugin_publication_admissions SET state=?, expires_at=? WHERE track_key=?`, admissionState, time.Now().Add(publicationTTL).UTC().Format("2006-01-02 15:04:05"), track)
 	return err
 }
 
@@ -490,24 +503,30 @@ func writeCommitEntries(ctx context.Context, tx *sql.Tx, writes []publicationWri
 }
 
 func writeCommitState(ctx context.Context, tx *sql.Tx, track string, batch publicationCommitRequest) error {
-	stateExpiry := time.Now().Add(publicationStateTTL)
+	now := time.Now()
+	stateExpiry := now.Add(publicationStateTTL)
 	shortest := batch.Writes[0].TTL
 	for _, write := range batch.Writes[1:] {
 		if write.TTL < shortest {
 			shortest = write.TTL
 		}
 	}
-	if candidate := time.Now().Add(time.Duration(shortest) * time.Second); candidate.Before(stateExpiry) {
+	if candidate := now.Add(time.Duration(shortest) * time.Second); candidate.Before(stateExpiry) {
 		stateExpiry = candidate
+	}
+	if batch.SnapshotExpiresAt > 0 {
+		if snapshotExpiry := time.Unix(batch.SnapshotExpiresAt, 0); snapshotExpiry.Before(stateExpiry) {
+			stateExpiry = snapshotExpiry
+		}
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO plugin_publication_state
-			(track_key, scope, revision, snapshot_digest, complete, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+			(track_key, generation, scope, revision, snapshot_digest, complete, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(track_key) DO UPDATE SET
-			scope=excluded.scope, revision=excluded.revision, snapshot_digest=excluded.snapshot_digest,
-			complete=excluded.complete, expires_at=excluded.expires_at
-	`, track, batch.Scope, batch.Revision, batch.SnapshotDigest, batch.Complete, stateExpiry.UTC().Format("2006-01-02 15:04:05"))
+			generation=excluded.generation, scope=excluded.scope, revision=excluded.revision,
+			snapshot_digest=excluded.snapshot_digest, complete=excluded.complete, expires_at=excluded.expires_at
+	`, track, batch.Generation, batch.Scope, batch.Revision, batch.SnapshotDigest, batch.Complete, stateExpiry.UTC().Format("2006-01-02 15:04:05"))
 	return err
 }
 

@@ -136,6 +136,7 @@ func createKVStoreSchema(db *sql.DB) error {
 			complete INTEGER NOT NULL,
 			expires_at DATETIME NOT NULL
 		)`,
+		`ALTER TABLE plugin_publication_state ADD COLUMN generation TEXT NOT NULL DEFAULT ''`,
 	})
 }
 
