@@ -354,6 +354,12 @@ func (s *kvstoreServiceImpl) GetMany(ctx context.Context, keys []string) (map[st
 	if len(keys) == 0 {
 		return map[string][]byte{}, nil
 	}
+	var publicationKeys []string
+	for _, key := range keys {
+		if isPublicationKey(key) {
+			publicationKeys = append(publicationKeys, key)
+		}
+	}
 	keys = slices.DeleteFunc(slices.Clone(keys), isPublicationKey)
 
 	const batchSize = 200
@@ -388,6 +394,13 @@ func (s *kvstoreServiceImpl) GetMany(ctx context.Context, keys []string) (map[st
 		rows.Close()
 	}
 
+	for _, key := range publicationKeys {
+		if value, exists, err := s.Get(ctx, key); err != nil {
+			return nil, err
+		} else if exists {
+			result[key] = value
+		}
+	}
 	log.Trace(ctx, "KVStore.GetMany", "plugin", s.pluginName, "requested", len(keys), "found", len(result))
 	return result, nil
 }

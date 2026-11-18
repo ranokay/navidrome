@@ -122,13 +122,13 @@ func (l *lyricsService) fromPlugin(ctx context.Context, mf *model.MediaFile, plu
 func (l *lyricsService) classicPluginLyrics(ctx context.Context, provider Provider, mf *model.MediaFile) (model.LyricList, error) {
 	if publication, ok := provider.(PublicationProvider); ok && publication.PublicationGeneration() != "" {
 		call := model.LyricsPublication{Generation: publication.PublicationGeneration(), Kind: "classic"}
-		list, _, supported, err := publication.GetLyricsWithPublication(ctx, mf, call)
+		list, _, _, err := publication.GetLyricsWithPublication(ctx, mf, call)
 		if err != nil {
 			return nil, err
 		}
-		if supported {
-			return list, nil
-		}
+		// The adapter already called the required v1 export when the optional
+		// classic export is unsupported; do not issue a second lookup.
+		return list, nil
 	}
 	return provider.GetLyrics(ctx, mf)
 }
@@ -199,6 +199,9 @@ func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFil
 			}
 			loaded, supported, loadErr := publication.GetLyricsDetailedResultWithRefresh(loadCtx, mf, call, refresh)
 			if loadErr != nil {
+				if refresh && refreshPublication.Generation != "" {
+					_ = publication.AbortPublication(context.WithoutCancel(loadCtx), mf, refreshPublication)
+				}
 				return model.LyricsResult{}, loadErr
 			}
 			if supported {
@@ -208,11 +211,6 @@ func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFil
 		return loadDetailedResult(loadCtx, provider, mf)
 	})
 	if err != nil {
-		if refresh && refreshPublication.Generation != "" && ctx.Err() == nil {
-			if publication, ok := provider.(PublicationProvider); ok {
-				_ = publication.AbortPublication(context.WithoutCancel(ctx), mf, refreshPublication)
-			}
-		}
 		return model.LyricsResult{}, err
 	}
 	if len(result.Lyrics) > 0 {

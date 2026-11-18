@@ -285,7 +285,10 @@ func (s *kvstoreServiceImpl) readAdmission(ctx context.Context, track string) (p
 	if err != nil {
 		return publicationAdmission{}, false, err
 	}
-	row.Valid = valid == 1
+	if valid != 1 {
+		return publicationAdmission{}, false, nil
+	}
+	row.Valid = true
 	return row, true, nil
 }
 
@@ -426,7 +429,7 @@ func (s *kvstoreServiceImpl) checkCommitQuota(ctx context.Context, tx *sql.Tx, w
 	delta := int64(0)
 	for _, write := range writes {
 		var oldSize int64
-		err := tx.QueryRowContext(ctx, `SELECT COALESCE(size,0) FROM kvstore WHERE key = ?`, write.Key).Scan(&oldSize)
+		err := tx.QueryRowContext(ctx, `SELECT COALESCE(size,0) FROM kvstore WHERE key = ? AND `+notExpiredFilter, write.Key).Scan(&oldSize)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
