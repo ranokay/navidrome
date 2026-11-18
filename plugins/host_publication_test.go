@@ -540,4 +540,22 @@ func TestPublicationControlMergeIsMonotonic(t *testing.T) {
 	bad, err := json.Marshal(publicationControlMerge{Value: 0, TTL: 0})
 	require.NoError(t, err)
 	require.Error(t, service.SetWithTTL(t.Context(), publicationControlPrefix+"cooldown:bad", bad, 120))
+
+	// A permanent normal-key target stays permanent and cannot be lowered.
+	permanent := "cooldown:permanent"
+	_, err = service.db.ExecContext(t.Context(), `
+		INSERT INTO kvstore (key, value, size, created_at, updated_at, expires_at)
+		VALUES (?, '1000', 4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)`, permanent)
+	require.NoError(t, err)
+	request, err = json.Marshal(publicationControlMerge{Value: 50, TTL: 60})
+	require.NoError(t, err)
+	require.NoError(t, service.SetWithTTL(t.Context(), publicationControlPrefix+permanent, request, 120))
+	raw, exists, err = service.Get(t.Context(), permanent)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.Equal(t, "1000", string(raw))
+	var permanentExpiry sql.NullInt64
+	require.NoError(t, service.db.QueryRowContext(t.Context(),
+		`SELECT CAST(strftime('%s', expires_at) AS INTEGER) FROM kvstore WHERE key=?`, permanent).Scan(&permanentExpiry))
+	require.False(t, permanentExpiry.Valid, "a permanent target acquired an expiry")
 }

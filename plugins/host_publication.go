@@ -515,15 +515,16 @@ func (s *kvstoreServiceImpl) mergeControl(ctx context.Context, target string, pa
 	}
 	defer func() { _ = tx.Rollback() }()
 	var oldValue, oldSize, oldExpires int64
-	var valid int
+	var permanent, valid int
 	err = tx.QueryRowContext(ctx, `
 		SELECT COALESCE(CAST(value AS INTEGER),0), COALESCE(size,0),
 			COALESCE(CAST(strftime('%s', expires_at) AS INTEGER),0),
-			CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END
+			CASE WHEN expires_at IS NULL THEN 1 ELSE 0 END,
+			CASE WHEN expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END
 		FROM kvstore WHERE key = ?
-	`, target).Scan(&oldValue, &oldSize, &oldExpires, &valid)
+	`, target).Scan(&oldValue, &oldSize, &oldExpires, &permanent, &valid)
 	if errors.Is(err, sql.ErrNoRows) {
-		oldValue, oldSize, oldExpires, valid = 0, 0, 0, 0
+		oldValue, oldSize, oldExpires, permanent, valid = 0, 0, 0, 0, 0
 	} else if err != nil {
 		return err
 	}
@@ -536,7 +537,9 @@ func (s *kvstoreServiceImpl) mergeControl(ctx context.Context, target string, pa
 		newValue = oldValue
 	}
 	newExpiry := time.Now().Unix() + request.TTL
-	if valid == 1 && oldExpires > newExpiry {
+	if valid == 1 && permanent == 1 {
+		newExpiry = 0
+	} else if valid == 1 && oldExpires > newExpiry {
 		newExpiry = oldExpires
 	}
 	value := strconv.FormatInt(newValue, 10)
@@ -550,12 +553,16 @@ func (s *kvstoreServiceImpl) mergeControl(ctx context.Context, target string, pa
 			return fmt.Errorf("%w: storage limit", errPublicationRejected)
 		}
 	}
+	var expiry any
+	if newExpiry > 0 {
+		expiry = newExpiry
+	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO kvstore (key, value, size, created_at, updated_at, expires_at)
 		VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, datetime(?, 'unixepoch'))
 		ON CONFLICT(key) DO UPDATE SET
 			value=excluded.value, size=excluded.size, updated_at=CURRENT_TIMESTAMP, expires_at=excluded.expires_at
-	`, target, value, len(value), newExpiry)
+	`, target, value, len(value), expiry)
 	if err != nil {
 		return err
 	}

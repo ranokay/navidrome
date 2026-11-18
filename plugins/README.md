@@ -649,9 +649,11 @@ generation, admission and state records.
   active tails cannot block the reloaded host. State is process-scoped: a
   reload mints a new generation, and old rows are ignored rather than reused.
 - `@navidrome/publication/control:<key>`: atomically raise a normal scalar
-  `key` to an integer `{value, ttl}` maximum and extend its TTL. Cooldown and
-  failure observations use this path; the target must not be reserved or use
-  a discovery prefix. Read the target key for the merged value.
+  `key` to an integer `{value, ttl}` maximum and extend its TTL. `value` must
+  be positive and `ttl` at most 24 hours. Cooldown and failure observations
+  use this path; the target must not be reserved or use a discovery prefix.
+  A permanent target stays permanent. Read the target key for the merged
+  value.
 - A commit consumes its admission: `resume` and `commit` require the admission
   state to be `active`. After a terminal commit the token cannot be replayed;
   use `state:<track>` to confirm a response whose commit reply was lost.
