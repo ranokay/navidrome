@@ -629,7 +629,9 @@ generation, admission and state records.
   scope, revision, snapshotDigest, complete, writes}`. `snapshotDigest` is
   SHA-256 over each write's `key`, NUL, `value`, NUL in batch order, then the
   track key and one `0`/`1` completion byte; `revision` is the first 16 bytes
-  of SHA-256 over the protocol version, generation, track and digest. The host
+  (lowercase hex) of SHA-256 over the literal
+  `navidrome-better-lyrics/publication/v1`, NUL, generation, NUL, track, NUL and
+  the digest. The host
   recomputes the digest, checks the live generation and exact admission token
   in the same transaction as every write, stores the bounded revision and
   completion record, and rolls the whole batch back on quota, size, TTL or

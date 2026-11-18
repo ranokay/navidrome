@@ -116,7 +116,7 @@ func TestPublicationAdmissionResumeIsExact(t *testing.T) {
 
 	resume, err := json.Marshal(publicationAdmissionRequest{
 		Version: publicationVersion, Action: "resume", RequestID: "call",
-		Generation: "generation-1", Track: track, Kind: "sweep", Token: admission.Token,
+		Generation: "generation-1", Track: track, Scope: "scope", Kind: "sweep", Token: admission.Token,
 	})
 	require.NoError(t, err)
 	require.Error(t, service.admitPublication(t.Context(), track, resume))
@@ -124,7 +124,7 @@ func TestPublicationAdmissionResumeIsExact(t *testing.T) {
 	current := admitTestPublication(t, service, "generation-1", track, "refresh", "current")
 	resume, err = json.Marshal(publicationAdmissionRequest{
 		Version: publicationVersion, Action: "resume", RequestID: "current",
-		Generation: "generation-1", Track: track, Kind: "refresh", Token: current.Token,
+		Generation: "generation-1", Track: track, Scope: "scope", Kind: "refresh", Token: current.Token,
 	})
 	require.NoError(t, err)
 	require.NoError(t, service.admitPublication(t.Context(), track, resume))
@@ -187,7 +187,7 @@ func TestPublicationRejectsTamperedSnapshotDigest(t *testing.T) {
 	raw := testCommit(t, "generation-1", admission.Token, track)
 	var batch publicationCommitRequest
 	require.NoError(t, json.Unmarshal(raw, &batch))
-	batch.SnapshotDigest = "tampered"
+	batch.Writes[0].Value = []byte("tampered")
 	raw, err := json.Marshal(batch)
 	require.NoError(t, err)
 	require.Error(t, service.commitPublication(t.Context(), track, raw))

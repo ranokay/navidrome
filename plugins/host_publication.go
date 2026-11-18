@@ -99,9 +99,11 @@ func (s *kvstoreServiceImpl) AdmitHost(ctx context.Context, generation, track, k
 	if err := s.admitPublication(ctx, track, request); err != nil {
 		return "", err
 	}
+	s.publicationMu.Lock()
+	defer s.publicationMu.Unlock()
 	row, exists, err := s.readAdmission(ctx, track)
-	if err != nil || !exists {
-		return "", err
+	if err != nil || !exists || row.RequestID != requestID || row.Generation != generation {
+		return "", fmt.Errorf("%w: admission superseded", errPublicationRejected)
 	}
 	return row.Token, nil
 }
@@ -230,7 +232,7 @@ func (s *kvstoreServiceImpl) admitPublication(ctx context.Context, track string,
 	case "release":
 		return s.releaseAdmission(ctx, track, request, current, exists)
 	case "resume":
-		if !exists || current.Generation != request.Generation || current.Token != request.Token || current.State == "released" {
+		if !exists || current.Generation != request.Generation || current.Token != request.Token || current.Scope != request.Scope || current.State == "released" {
 			return fmt.Errorf("%w: stale admission", errPublicationRejected)
 		}
 		return nil
@@ -416,19 +418,19 @@ func (s *kvstoreServiceImpl) applyCommitTx(ctx context.Context, tx *sql.Tx, trac
 	if generation == "" || generation != batch.Generation {
 		return fmt.Errorf("%w: generation changed", errPublicationRejected)
 	}
-	var token, state string
+	var token, state, scope string
 	var valid int
 	err = tx.QueryRowContext(ctx, `
-		SELECT token, state, CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END
+		SELECT token, state, scope, CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END
 		FROM plugin_publication_admissions WHERE track_key = ?
-	`, track).Scan(&token, &state, &valid)
+	`, track).Scan(&token, &state, &scope, &valid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: no admission", errPublicationRejected)
 	}
 	if err != nil {
 		return err
 	}
-	if token != batch.Token || state == "released" || valid != 1 {
+	if token != batch.Token || scope != batch.Scope || state == "released" || valid != 1 {
 		return fmt.Errorf("%w: stale admission", errPublicationRejected)
 	}
 	if err := s.checkCommitQuota(ctx, tx, batch.Writes); err != nil {

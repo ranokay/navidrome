@@ -161,4 +161,7 @@ func TestUnsupportedRefreshReleasesAdmission(t *testing.T) {
 	if p.aborts.Load() != 1 {
 		t.Fatalf("aborts = %d, want the unsupported refresh admission released", p.aborts.Load())
 	}
+	if p.calls.Load() != 1 {
+		t.Fatalf("provider calls = %d, want the v1 fallback reused", p.calls.Load())
+	}
 }
