@@ -654,15 +654,19 @@ generation, admission and state records.
   `key` to an integer `{value, ttl}` maximum and extend its TTL. `value` must
   be positive; `ttl` is in seconds, must be positive and at most 24 hours, and
   must cover the value's intended lifetime. Merges are subject to the plugin
-  storage quota. Cooldown and failure observations use this path; the target
-  must not be reserved, `lyrics:v5:` or `sweep-done:`, and a permanent target
-  stays permanent. Only targets written exclusively through this path are
-  monotonic. Read the target key for the merged value; for a scalar merge a
-  missing, expired or non-integer target starts from zero. The same namespace accepts
-  `{operation:"failure", failures, until, updatedAt, ttl}` and
-  `{operation:"reset", resetAt, ttl}` for the source-failure row: failures
-  older than the row's recovery timestamp are ignored, and a recovery clears
-  only failures that predate it. The plugin reads the complete row and the
+  storage quota. Cooldown observations use this form; the target must not be
+  reserved, `lyrics:v5:`, `sweep-done:` or `source-failure-reset:v1:`, and a
+  permanent scalar target stays permanent. Only targets written exclusively
+  through this path are monotonic. Read the target key for the merged value;
+  for a scalar merge a missing, expired or non-integer target starts from zero.
+  The same namespace accepts `{operation:"failure", failures, until, updatedAt,
+  ttl}` and `{operation:"reset", resetAt, ttl}` only for the
+  `source-failure:v1:<source>` row. Both require positive timestamps, and a
+  failure also requires positive `failures` and `until`; an unknown operation
+  or a scalar merge to that prefix is rejected. Failures older than the row's
+  recovery timestamp are ignored, and a recovery clears only failures that
+  predate it. Reducer rows and the derived `source-failure-reset:v1:<source>`
+  key are TTL-bound, not permanent. The plugin reads the complete row and the
   legacy reset key.
 - A terminal commit consumes its admission: `resume` and `commit` require the
   admission state to be `active`. An `awaitTail` commit keeps it active for the

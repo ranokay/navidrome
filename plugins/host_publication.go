@@ -222,7 +222,8 @@ func (s *kvstoreServiceImpl) handlePublicationSet(ctx context.Context, key strin
 	case strings.HasPrefix(key, publicationControlPrefix):
 		target := strings.TrimPrefix(key, publicationControlPrefix)
 		if target == "" || len(target) > maxKeyLength || isPublicationKey(target) ||
-			strings.HasPrefix(target, "lyrics:v5:") || strings.HasPrefix(target, "sweep-done:") {
+			strings.HasPrefix(target, "lyrics:v5:") || strings.HasPrefix(target, "sweep-done:") ||
+			strings.HasPrefix(target, "source-failure-reset:v1:") {
 			return fmt.Errorf("%w: invalid control target", errPublicationRejected)
 		}
 		return s.controlPublication(ctx, target, value)
@@ -508,13 +509,28 @@ func (s *kvstoreServiceImpl) controlPublication(ctx context.Context, target stri
 		request.TTL > int64(publicationStateTTL/time.Second) {
 		return fmt.Errorf("%w: invalid control request", errPublicationRejected)
 	}
-	if request.Operation == "failure" || request.Operation == "reset" {
+	switch request.Operation {
+	case "":
+		if strings.HasPrefix(target, "source-failure:v1:") {
+			return fmt.Errorf("%w: source-failure rows require an operation", errPublicationRejected)
+		}
+		if request.Value <= 0 {
+			return fmt.Errorf("%w: invalid control merge", errPublicationRejected)
+		}
+		return s.mergeControl(ctx, target, payload)
+	case "failure":
+		if request.Failures <= 0 || request.Until <= 0 || request.UpdatedAt <= 0 {
+			return fmt.Errorf("%w: incomplete failure control", errPublicationRejected)
+		}
 		return s.reduceSourceFailure(ctx, target, request)
+	case "reset":
+		if request.ResetAt <= 0 {
+			return fmt.Errorf("%w: incomplete reset control", errPublicationRejected)
+		}
+		return s.reduceSourceFailure(ctx, target, request)
+	default:
+		return fmt.Errorf("%w: unknown control operation", errPublicationRejected)
 	}
-	if request.Value <= 0 {
-		return fmt.Errorf("%w: invalid control merge", errPublicationRejected)
-	}
-	return s.mergeControl(ctx, target, payload)
 }
 
 type sourceFailureControl struct {

@@ -629,3 +629,34 @@ func TestPublicationActiveExposesControlMerge(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &active))
 	require.True(t, active.ControlMerge)
 }
+
+func TestPublicationControlRejectsInvalidOperations(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	target := "source-failure:v1:track-1"
+	writeFailureControl(t, service, target, publicationControlMerge{
+		Operation: "failure", Failures: 1, Until: 20_000, UpdatedAt: 15_000, TTL: 600,
+	})
+	before := readFailureControl(t, service, target)
+
+	reject := func(key string, request publicationControlMerge) {
+		t.Helper()
+		payload, err := json.Marshal(request)
+		require.NoError(t, err)
+		require.Error(t, service.SetWithTTL(t.Context(), publicationControlPrefix+key, payload, 700))
+	}
+
+	// An unknown operation must not fall through to a scalar merge that
+	// overwrites the structured row.
+	reject(target, publicationControlMerge{Value: 5, TTL: 600, Operation: "typo"})
+	reject(target, publicationControlMerge{Value: 5, TTL: 600})
+	require.Equal(t, before, readFailureControl(t, service, target))
+
+	// Required fields are enforced per operation.
+	reject(target, publicationControlMerge{Operation: "failure", Until: 20_000, UpdatedAt: 15_000, TTL: 600})
+	reject(target, publicationControlMerge{Operation: "failure", Failures: 1, UpdatedAt: 15_000, TTL: 600})
+	reject(target, publicationControlMerge{Operation: "failure", Failures: 1, Until: 20_000, TTL: 600})
+	reject(target, publicationControlMerge{Operation: "reset", TTL: 600})
+	// The derived reset key is host-owned.
+	reject("source-failure-reset:v1:track-1", publicationControlMerge{Value: 5, TTL: 600})
+	require.Equal(t, before, readFailureControl(t, service, target))
+}
