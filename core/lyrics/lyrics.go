@@ -81,6 +81,7 @@ type PublicationProvider interface {
 	StartPublication(ctx context.Context, mf *model.MediaFile, kind string) (model.LyricsPublication, bool, error)
 	GetLyricsWithPublication(ctx context.Context, mf *model.MediaFile, publication model.LyricsPublication) (model.LyricList, model.LyricsDiscovery, bool, error)
 	GetLyricsDetailedResultWithRefresh(ctx context.Context, mf *model.MediaFile, publication model.LyricsPublication, refresh bool) (model.LyricsResult, bool, error)
+	AbortPublication(ctx context.Context, mf *model.MediaFile, publication model.LyricsPublication) error
 	GetOriginalWithPublication(ctx context.Context, mf *model.MediaFile, identity model.LyricsVariantIdentity, publication model.LyricsPublication) (model.LyricsOriginal, bool, error)
 }
 
