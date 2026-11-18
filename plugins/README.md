@@ -677,7 +677,7 @@ per value, allowed `lyrics:v5:`/`sweep-done:` prefixes containing the admitted
 track key, and the host's configured quota (the shipped lyrics plugin declares 32 MB) while
 leaving 1 MiB of control headroom where the quota permits. Cooldowns, salts, immutable originals
 and task markers remain separate control writes; capable hosts merge cooldown
-and failure scalars through the `control:` namespace.
+scalars and reduce source-failure rows through the `control:` namespace.
 
 ### Storage
 

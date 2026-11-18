@@ -528,7 +528,7 @@ type sourceFailureControl struct {
 // row transaction. A recovery only clears a failure that predates its start;
 // a newer failure survives even if the recovery request arrives later.
 func (s *kvstoreServiceImpl) reduceSourceFailure(ctx context.Context, target string, request publicationControlMerge) error {
-	if !strings.HasPrefix(target, "source-failure:v1:") {
+	if !strings.HasPrefix(target, "source-failure:v1:") || strings.TrimPrefix(target, "source-failure:v1:") == "" {
 		return fmt.Errorf("%w: invalid failure target", errPublicationRejected)
 	}
 	s.publicationMu.Lock()
@@ -553,6 +553,22 @@ func (s *kvstoreServiceImpl) reduceSourceFailure(ctx context.Context, target str
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &state)
 	}
+	sourceID := strings.TrimPrefix(target, "source-failure:v1:")
+	resetKey := "source-failure-reset:v1:" + sourceID
+	var oldResetSize int64
+	var resetRaw []byte
+	err = tx.QueryRowContext(ctx, `
+		SELECT value, COALESCE(size,0) FROM kvstore
+		WHERE key = ? AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+	`, resetKey).Scan(&resetRaw, &oldResetSize)
+	if errors.Is(err, sql.ErrNoRows) {
+		oldResetSize = 0
+	} else if err != nil {
+		return err
+	}
+	if parsed, parseErr := strconv.ParseInt(string(resetRaw), 10, 64); parseErr == nil && parsed > state.ResetAt {
+		state.ResetAt = parsed
+	}
 	switch request.Operation {
 	case "failure":
 		if request.UpdatedAt < state.ResetAt {
@@ -574,6 +590,11 @@ func (s *kvstoreServiceImpl) reduceSourceFailure(ctx context.Context, target str
 		return err
 	}
 	delta := int64(len(value)) - oldSize
+	resetValue := ""
+	if request.Operation == "reset" {
+		resetValue = strconv.FormatInt(state.ResetAt, 10)
+		delta += int64(len(resetValue)) - oldResetSize
+	}
 	if delta > 0 {
 		used, err := storageUsedTx(ctx, tx)
 		if err != nil {
@@ -593,9 +614,6 @@ func (s *kvstoreServiceImpl) reduceSourceFailure(ctx context.Context, target str
 		return err
 	}
 	if request.Operation == "reset" {
-		sourceID := strings.TrimPrefix(target, "source-failure:v1:")
-		resetKey := "source-failure-reset:v1:" + sourceID
-		resetValue := strconv.FormatInt(state.ResetAt, 10)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO kvstore (key, value, size, created_at, updated_at, expires_at)
 			VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, datetime(?, 'unixepoch'))
@@ -608,8 +626,8 @@ func (s *kvstoreServiceImpl) reduceSourceFailure(ctx context.Context, target str
 }
 
 // mergeControl atomically raises a scalar KV record to the requested value.
-// Cooldown and failure state use it so concurrent capable-host writers cannot
-// shorten a newer deadline or erase a newer observation. The TTL must cover
+// Cooldown state uses it so concurrent capable-host writers cannot shorten a
+// newer deadline. Source failure state uses reduceSourceFailure instead. The TTL must cover
 // the value's intended lifetime; readers read the target key, not the control
 // request. Only writers using this path are merged.
 func (s *kvstoreServiceImpl) mergeControl(ctx context.Context, target string, payload []byte) error {
