@@ -571,6 +571,9 @@ func (s *kvstoreServiceImpl) reduceSourceFailure(ctx context.Context, target str
 	}
 	sourceID := strings.TrimPrefix(target, "source-failure:v1:")
 	resetKey := "source-failure-reset:v1:" + sourceID
+	if len(resetKey) > maxKeyLength {
+		return fmt.Errorf("%w: failure source too long", errPublicationRejected)
+	}
 	var oldResetSize int64
 	var resetRaw []byte
 	err = tx.QueryRowContext(ctx, `
@@ -596,9 +599,11 @@ func (s *kvstoreServiceImpl) reduceSourceFailure(ctx context.Context, target str
 	case "reset":
 		if request.ResetAt > state.ResetAt {
 			state.ResetAt = request.ResetAt
-			if state.UpdatedAt < request.ResetAt {
-				state.Failures, state.Until, state.UpdatedAt = 0, 0, 0
-			}
+		}
+		// The stored epoch may predate this request (an imported legacy
+		// reset); clear failures that predate whichever epoch is live.
+		if state.UpdatedAt < state.ResetAt {
+			state.Failures, state.Until, state.UpdatedAt = 0, 0, 0
 		}
 	}
 	value, err := json.Marshal(state)

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -659,4 +660,46 @@ func TestPublicationControlRejectsInvalidOperations(t *testing.T) {
 	// The derived reset key is host-owned.
 	reject("source-failure-reset:v1:track-1", publicationControlMerge{Value: 5, TTL: 600})
 	require.Equal(t, before, readFailureControl(t, service, target))
+}
+
+func TestFailureResetRejectsOversizedDerivedKey(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	target := "source-failure:v1:" + strings.Repeat("a", maxKeyLength-len("source-failure:v1:"))
+	require.Equal(t, maxKeyLength, len(target))
+
+	payload, err := json.Marshal(publicationControlMerge{Operation: "reset", ResetAt: 10_000, TTL: 600})
+	require.NoError(t, err)
+	require.Error(t, service.SetWithTTL(t.Context(), publicationControlPrefix+target, payload, 700))
+
+	// The source is rejected for both reducer operations because its derived
+	// reset key would exceed the key limit.
+	payload, err = json.Marshal(publicationControlMerge{
+		Operation: "failure", Failures: 1, Until: 20_000, UpdatedAt: 15_000, TTL: 600,
+	})
+	require.NoError(t, err)
+	require.Error(t, service.SetWithTTL(t.Context(), publicationControlPrefix+target, payload, 700))
+	_, exists, err := service.Get(t.Context(), target)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+func TestFailureResetClearsImportedLegacyReset(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	target := "source-failure:v1:track-1"
+	resetKey := "source-failure-reset:v1:track-1"
+	writeFailureControl(t, service, target, publicationControlMerge{
+		Operation: "failure", Failures: 1, Until: 20_000, UpdatedAt: 15_000, TTL: 600,
+	})
+	require.NoError(t, service.SetWithTTL(t.Context(), resetKey, []byte("18000"), 600))
+
+	// A reset that started before the imported epoch must still clear the
+	// older failure state.
+	writeFailureControl(t, service, target, publicationControlMerge{
+		Operation: "reset", ResetAt: 16_000, TTL: 600,
+	})
+	state := readFailureControl(t, service, target)
+	require.Zero(t, state.Failures)
+	require.Zero(t, state.Until)
+	require.Zero(t, state.UpdatedAt)
+	require.EqualValues(t, 18_000, state.ResetAt)
 }
