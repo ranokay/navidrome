@@ -1,13 +1,48 @@
-import { vi } from 'vitest'
+import { afterEach, vi } from 'vitest'
 import config from '../config'
-import subsonic from './index'
 import { httpClient } from '../dataProvider'
+import subsonic from './index'
 
 vi.mock('../dataProvider', () => ({
-  httpClient: vi.fn(),
+  httpClient: vi.fn((target) => Promise.resolve({ target })),
   clientUniqueId: 'test-client-id',
-  clientUniqueIdHeader: 'X-ND-Client-Unique-Id',
+  clientUniqueIdHeader: 'x-test-client-id',
 }))
+
+const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(
+  window,
+  'localStorage',
+)
+
+const mockSubsonicLocalStorage = () => {
+  const localStorageMock = {
+    getItem: vi.fn((key) => {
+      const values = {
+        username: 'testuser',
+        'subsonic-token': 'testtoken',
+        'subsonic-salt': 'testsalt',
+      }
+      return values[key] || null
+    }),
+    setItem: vi.fn(),
+    clear: vi.fn(),
+  }
+
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: localStorageMock,
+  })
+}
+
+afterEach(() => {
+  if (originalLocalStorageDescriptor) {
+    Object.defineProperty(
+      window,
+      'localStorage',
+      originalLocalStorageDescriptor,
+    )
+  }
+})
 
 describe('getCoverArtUrl', () => {
   beforeEach(() => {
@@ -15,20 +50,7 @@ describe('getCoverArtUrl', () => {
     delete window.location
     window.location = { href: 'http://localhost:3000/app' }
 
-    // Mock localStorage values required by subsonic
-    const localStorageMock = {
-      getItem: vi.fn((key) => {
-        const values = {
-          username: 'testuser',
-          'subsonic-token': 'testtoken',
-          'subsonic-salt': 'testsalt',
-        }
-        return values[key] || null
-      }),
-      setItem: vi.fn(),
-      clear: vi.fn(),
-    }
-    Object.defineProperty(window, 'localStorage', { value: localStorageMock })
+    mockSubsonicLocalStorage()
   })
 
   it('should return playlist cover art URL for records with sync property', () => {
@@ -170,19 +192,192 @@ describe('getCoverArtUrl', () => {
   })
 })
 
+describe('getLyricsBySongId', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockSubsonicLocalStorage()
+  })
+
+  it('requests enhanced structured lyrics for the song id', async () => {
+    await subsonic.getLyricsBySongId('song-123')
+
+    expect(httpClient).toHaveBeenCalledTimes(1)
+    const requestedUrl = httpClient.mock.calls[0][0]
+    expect(requestedUrl).toContain('/rest/getLyricsBySongId?')
+    expect(requestedUrl).toContain('id=song-123')
+    expect(requestedUrl).toContain('enhanced=true')
+  })
+
+  it('requests all sources separately from HTTP request options', async () => {
+    const controller = new AbortController()
+    await subsonic.getLyricsBySongId('song-123', {
+      allSources: true,
+      signal: controller.signal,
+    })
+    expect(httpClient).toHaveBeenCalledWith(
+      expect.stringContaining('allSources=true'),
+      { signal: controller.signal },
+    )
+  })
+
+  it('rejects a failed Subsonic lyrics response with its server message', async () => {
+    httpClient.mockResolvedValueOnce({
+      json: {
+        'subsonic-response': {
+          status: 'failed',
+          error: {
+            code: 0,
+            message: 'error getting lyrics; retry after 30s',
+          },
+        },
+      },
+    })
+
+    await expect(subsonic.getLyricsBySongId('song-123')).rejects.toThrow(
+      'error getting lyrics; retry after 30s',
+    )
+  })
+})
+
+describe('lyrics personal preference mutation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockSubsonicLocalStorage()
+  })
+
+  it('POSTs a deliberate preference action', async () => {
+    await subsonic.updateLyricsPreference('song-123', {
+      action: 'select',
+      local: 'local:v1:abc',
+    })
+
+    expect(httpClient).toHaveBeenCalledWith(
+      expect.stringContaining('/rest/setLyricsPreference?'),
+      { method: 'POST' },
+    )
+    const requestedUrl = httpClient.mock.calls[0][0]
+    expect(requestedUrl).toContain('id=song-123')
+    expect(requestedUrl).toContain('action=select')
+    expect(requestedUrl).toContain('local=local%3Av1%3Aabc')
+  })
+
+  it('rejects a failed preference mutation with the server message', async () => {
+    httpClient.mockResolvedValueOnce({
+      json: {
+        'subsonic-response': {
+          status: 'failed',
+          error: { code: 0, message: 'could not save the lyrics preference' },
+        },
+      },
+    })
+    await expect(
+      subsonic.updateLyricsPreference('song-123', { action: 'auto' }),
+    ).rejects.toThrow('could not save the lyrics preference')
+  })
+})
+
+describe('lyrics original retrieval', () => {
+  const response = ({
+    body = new Blob(['document']),
+    contentType = 'application/ttml+xml',
+    disposition = 'attachment; filename="Artist - Song.ttml"',
+    status = 200,
+    json = null,
+  } = {}) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get: (name) =>
+        ({
+          'Content-Type': contentType,
+          'Content-Disposition': disposition,
+        })[name] || null,
+    },
+    json: async () => json,
+    blob: async () => body,
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockSubsonicLocalStorage()
+  })
+
+  it('requests the variant listing for the song id', async () => {
+    await subsonic.getLyricsVariants('song-123')
+    expect(httpClient).toHaveBeenCalledTimes(1)
+    expect(httpClient.mock.calls[0][0]).toContain('/rest/getLyricsVariants?')
+    expect(httpClient.mock.calls[0][0]).toContain('id=song-123')
+  })
+
+  it('returns exact original bytes with the server filename and media type', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response())
+    vi.stubGlobal('fetch', fetchMock)
+
+    const original = await subsonic.getLyricsOriginal('song-1', 'selection-1')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/rest/getLyricsOriginal?'),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'x-test-client-id': 'test-client-id',
+        }),
+      }),
+    )
+    expect(fetchMock.mock.calls[0][0]).toContain('selection=selection-1')
+    expect(original.filename).toBe('Artist - Song.ttml')
+    expect(original.mediaType).toBe('application/ttml+xml')
+    expect(original.blob).toBeInstanceOf(Blob)
+  })
+
+  it('decodes RFC 5987 filenames', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        response({
+          disposition: "attachment; filename*=utf-8''%E6%AD%8C%20-%20Song.qrc",
+        }),
+      ),
+    )
+    const original = await subsonic.getLyricsOriginal('song-1', 'selection-1')
+    expect(original.filename).toBe('歌 - Song.qrc')
+  })
+
+  it('surfaces a JSON error instead of downloading the error envelope', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        response({
+          contentType: 'application/json; charset=utf-8',
+          json: {
+            'subsonic-response': {
+              status: 'failed',
+              error: { code: 70, message: 'lyrics original unavailable' },
+            },
+          },
+        }),
+      ),
+    )
+
+    await expect(
+      subsonic.getLyricsOriginal('song-1', 'selection-1'),
+    ).rejects.toThrow('lyrics original unavailable')
+  })
+
+  it('rejects non-success responses without a document', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ status: 500 })))
+    await expect(
+      subsonic.getLyricsOriginal('song-1', 'selection-1'),
+    ).rejects.toThrow('Lyrics original unavailable (500)')
+  })
+})
+
 describe('getDiscCoverArtUrl', () => {
   beforeEach(() => {
-    const localStorageMock = {
-      getItem: vi.fn((key) => {
-        const values = {
-          username: 'testuser',
-          'subsonic-token': 'testtoken',
-          'subsonic-salt': 'testsalt',
-        }
-        return values[key] || null
-      }),
-    }
-    Object.defineProperty(window, 'localStorage', { value: localStorageMock })
+    mockSubsonicLocalStorage()
   })
 
   it('should construct URL with dc-albumId:discNumber format, size, and cache param', () => {
@@ -222,18 +417,7 @@ describe('getDiscCoverArtUrl', () => {
 
 describe('getAvatarUrl', () => {
   beforeEach(() => {
-    // Mock localStorage values required by subsonic
-    const localStorageMock = {
-      getItem: vi.fn((key) => {
-        const values = {
-          username: 'testuser',
-          'subsonic-token': 'testtoken',
-          'subsonic-salt': 'testsalt',
-        }
-        return values[key] || null
-      }),
-    }
-    Object.defineProperty(window, 'localStorage', { value: localStorageMock })
+    mockSubsonicLocalStorage()
   })
 
   it('should include username parameter', () => {
@@ -245,17 +429,7 @@ describe('getAvatarUrl', () => {
 
 describe('reportPlayback', () => {
   beforeEach(() => {
-    const localStorageMock = {
-      getItem: vi.fn((key) => {
-        const values = {
-          username: 'testuser',
-          'subsonic-token': 'testtoken',
-          'subsonic-salt': 'testsalt',
-        }
-        return values[key] || null
-      }),
-    }
-    Object.defineProperty(window, 'localStorage', { value: localStorageMock })
+    mockSubsonicLocalStorage()
   })
 
   it('should construct reportPlayback URL with correct parameters', () => {

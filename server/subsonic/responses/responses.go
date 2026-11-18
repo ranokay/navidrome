@@ -60,6 +60,8 @@ type Subsonic struct {
 	// OpenSubsonic extensions
 	OpenSubsonicExtensions *OpenSubsonicExtensions `xml:"openSubsonicExtensions,omitempty"  json:"openSubsonicExtensions,omitempty"`
 	LyricsList             *LyricsList             `xml:"lyricsList,omitempty"              json:"lyricsList,omitempty"`
+	LyricsPersonal         *LyricsPersonal         `xml:"lyricsPersonal,omitempty"          json:"lyricsPersonal,omitempty"`
+	LyricsVariants         *LyricsVariants         `xml:"lyricsVariants,omitempty"          json:"lyricsVariants,omitempty"`
 	PlayQueueByIndex       *PlayQueueByIndex       `xml:"playQueueByIndex,omitempty" json:"playQueueByIndex,omitempty"`
 	TranscodeDecision      *TranscodeDecision      `xml:"transcodeDecision,omitempty"       json:"transcodeDecision,omitempty"`
 	SonicMatches           *Array[SonicMatch]      `xml:"sonicMatch,omitempty"              json:"sonicMatch,omitempty"`
@@ -573,21 +575,155 @@ type CueLine struct {
 	Cue     []LyricCue `xml:"cue,omitempty"                 json:"cue,omitempty"`
 }
 
+type LyricsSource struct {
+	Type     string `xml:"type,attr"               json:"type"`
+	Name     string `xml:"name,attr,omitempty"     json:"name,omitempty"`
+	PluginID string `xml:"pluginId,attr,omitempty" json:"pluginId,omitempty"`
+	Provider string `xml:"provider,attr,omitempty" json:"provider,omitempty"`
+	Format   string `xml:"format,attr,omitempty"   json:"format,omitempty"`
+}
+
 type StructuredLyric struct {
-	DisplayArtist string    `xml:"displayArtist,attr,omitempty" json:"displayArtist,omitempty"`
-	DisplayTitle  string    `xml:"displayTitle,attr,omitempty"  json:"displayTitle,omitempty"`
-	Kind          string    `xml:"kind,attr,omitempty"          json:"kind,omitempty"`
-	Lang          string    `xml:"lang,attr"                    json:"lang"`
-	Line          []Line    `xml:"line"                         json:"line"`
-	Agents        []Agent   `xml:"agent,omitempty"              json:"agents,omitempty"`
-	CueLine       []CueLine `xml:"cueLine,omitempty"     json:"cueLine,omitempty"`
-	Offset        *int64    `xml:"offset,attr,omitempty"        json:"offset,omitempty"`
-	Synced        bool      `xml:"synced,attr"                  json:"synced"`
+	DisplayArtist string                 `xml:"displayArtist,attr,omitempty" json:"displayArtist,omitempty"`
+	DisplayTitle  string                 `xml:"displayTitle,attr,omitempty"  json:"displayTitle,omitempty"`
+	Kind          string                 `xml:"kind,attr,omitempty"          json:"kind,omitempty"`
+	Lang          string                 `xml:"lang,attr"                    json:"lang"`
+	Line          []Line                 `xml:"line"                         json:"line"`
+	Agents        []Agent                `xml:"agent,omitempty"              json:"agents,omitempty"`
+	CueLine       []CueLine              `xml:"cueLine,omitempty"     json:"cueLine,omitempty"`
+	Offset        *int64                 `xml:"offset,attr,omitempty"        json:"offset,omitempty"`
+	Source        *LyricsSource          `xml:"source,omitempty"             json:"source,omitempty"`
+	Variant       *LyricsVariantIdentity `xml:"variant,omitempty"            json:"variant,omitempty"`
+	Local         *LyricsLocalIdentity   `xml:"local,omitempty"              json:"local,omitempty"`
+	Selection     string                 `xml:"selection,attr,omitempty"     json:"selection,omitempty"`
+	Match         *LyricsMatch           `xml:"match,omitempty"              json:"match,omitempty"`
+	Synced        bool                   `xml:"synced,attr"                  json:"synced"`
+}
+
+// LyricsMatch is the recording-identity assessment. AutoSaveEligible is true
+// only for a validated recording.
+type LyricsMatch struct {
+	Status        string   `xml:"status,attr"                    json:"status"`
+	Reasons       []string `xml:"reason,omitempty"               json:"reasons,omitempty"`
+	DurationDelta float64  `xml:"durationDelta,attr,omitempty"  json:"durationDelta,omitempty"`
+	Recording     string   `xml:"recording,attr,omitempty"       json:"recording,omitempty"`
+	AutoSave      bool     `xml:"autoSaveEligible,attr"          json:"autoSaveEligible"`
+}
+
+// LyricsEvidence is a typed, attributed provider observation separate from
+// playable lyric entries.
+type LyricsEvidence struct {
+	PluginID  string       `xml:"pluginId,attr,omitempty"  json:"pluginId,omitempty"`
+	Kind      string       `xml:"kind,attr"                json:"kind"`
+	Provider  string       `xml:"provider,attr,omitempty"  json:"provider,omitempty"`
+	Recording string       `xml:"recording,attr,omitempty" json:"recording,omitempty"`
+	Match     *LyricsMatch `xml:"match,omitempty"          json:"match,omitempty"`
+	Reason    string       `xml:"reason,attr,omitempty"    json:"reason,omitempty"`
 }
 
 type StructuredLyrics []StructuredLyric
 type LyricsList struct {
-	StructuredLyrics []StructuredLyric `xml:"structuredLyrics,omitempty" json:"structuredLyrics,omitempty"`
+	StructuredLyrics     []StructuredLyric `xml:"structuredLyrics,omitempty" json:"structuredLyrics,omitempty"`
+	InstrumentalEvidence []LyricsEvidence  `xml:"instrumentalEvidence,omitempty" json:"instrumentalEvidence,omitempty"`
+	Personal             *LyricsPersonal   `xml:"personal,omitempty" json:"personal,omitempty"`
+	SourcesIncomplete    bool              `xml:"sourcesIncomplete,attr,omitempty" json:"sourcesIncomplete,omitempty"`
+	RetryAfterSeconds    int               `xml:"retryAfterSeconds,attr,omitempty" json:"retryAfterSeconds,omitempty"`
+}
+
+// LyricsLocalIdentity is the host-issued address of one selectable embedded
+// or sidecar variant. It is separate from provider variant identities and
+// exact original-document selections and never contains a path.
+type LyricsLocalIdentity struct {
+	Version  int    `xml:"version,attr"             json:"version"`
+	Token    string `xml:"token,attr"               json:"token"`
+	Kind     string `xml:"kind,attr"                json:"kind"`
+	Format   string `xml:"format,attr,omitempty"    json:"format,omitempty"`
+	Language string `xml:"language,attr,omitempty"  json:"language,omitempty"`
+	Role     string `xml:"role,attr,omitempty"      json:"role,omitempty"`
+}
+
+// LyricsPersonal is the resolved listener state for one track. It is only
+// emitted on the enhanced listener surface and must not be shared-cached.
+type LyricsPersonal struct {
+	Revision    int64                    `xml:"revision,attr,omitempty" json:"revision,omitempty"`
+	Unsupported bool                     `xml:"unsupported,attr,omitempty" json:"unsupported,omitempty"`
+	Selection   *LyricsPersonalSelection `xml:"selection,omitempty" json:"selection,omitempty"`
+	Offsets     []LyricsPersonalOffset   `xml:"offset,omitempty" json:"offset,omitempty"`
+	Rejections  []LyricsPersonalRejected `xml:"rejection,omitempty" json:"rejection,omitempty"`
+}
+
+// LyricsPersonalSelection is the explicit pin. Status is pinned, rebound,
+// pending or unavailable; a local pin never changes address to a sibling.
+type LyricsPersonalSelection struct {
+	Kind      string                 `xml:"kind,attr"                json:"kind"`
+	Plugin    string                 `xml:"plugin,attr,omitempty"    json:"plugin,omitempty"`
+	Provider  string                 `xml:"provider,attr,omitempty"  json:"provider,omitempty"`
+	Identity  *LyricsVariantIdentity `xml:"identity,omitempty"      json:"identity,omitempty"`
+	Local     *LyricsLocalIdentity   `xml:"local,omitempty"         json:"local,omitempty"`
+	Selection string                 `xml:"selection,attr,omitempty" json:"selection,omitempty"`
+	Status    string                 `xml:"status,attr"              json:"status"`
+	Reason    string                 `xml:"reason,attr,omitempty"    json:"reason,omitempty"`
+}
+
+// LyricsPersonalOffset is one variant-specific timing correction.
+type LyricsPersonalOffset struct {
+	Kind      string               `xml:"kind,attr"                   json:"kind"`
+	Selection string               `xml:"selection,attr,omitempty"    json:"selection,omitempty"`
+	Local     *LyricsLocalIdentity `xml:"local,omitempty"            json:"local,omitempty"`
+	OffsetMs  int64                `xml:"offsetMs,attr"              json:"offsetMs"`
+}
+
+// LyricsPersonalRejected is one rejected provider recording. Token restores it.
+type LyricsPersonalRejected struct {
+	Token     string `xml:"token,attr"              json:"token"`
+	Plugin    string `xml:"plugin,attr"             json:"plugin"`
+	Provider  string `xml:"provider,attr,omitempty" json:"provider,omitempty"`
+	Instance  string `xml:"instance,attr,omitempty" json:"instance,omitempty"`
+	Recording string `xml:"recording,attr,omitempty" json:"recording,omitempty"`
+}
+
+// LyricsVariants lists the addressable playback representations. Documents are
+// retrieved separately by selection.
+type LyricsVariants struct {
+	Variants             []LyricsVariant  `xml:"variant,omitempty" json:"variant,omitempty"`
+	InstrumentalEvidence []LyricsEvidence `xml:"instrumentalEvidence,omitempty" json:"instrumentalEvidence,omitempty"`
+}
+
+// LyricsVariantIdentity is the versioned identity of one playback entry.
+type LyricsVariantIdentity struct {
+	Version   int    `xml:"version,attr"            json:"version"`
+	Instance  string `xml:"instance,attr,omitempty" json:"instance,omitempty"`
+	Recording string `xml:"recording,attr,omitempty" json:"recording,omitempty"`
+	Language  string `xml:"language,attr,omitempty" json:"language,omitempty"`
+	Role      string `xml:"role,attr,omitempty"     json:"role,omitempty"`
+	Format    string `xml:"format,attr,omitempty"   json:"format,omitempty"`
+}
+
+// LyricsOriginalInfo reports whether an exact native document is retrievable.
+type LyricsOriginalInfo struct {
+	Available  bool   `xml:"available,attr"                    json:"available"`
+	Format     string `xml:"format,attr,omitempty"             json:"format,omitempty"`
+	Provenance string `xml:"provenance,attr,omitempty"         json:"provenance,omitempty"`
+	MediaType  string `xml:"mediaType,attr,omitempty"          json:"mediaType,omitempty"`
+	Extension  string `xml:"extension,attr,omitempty"          json:"extension,omitempty"`
+	Size       int    `xml:"size,attr,omitempty"               json:"size,omitempty"`
+	Reason     string `xml:"reason,attr,omitempty"             json:"reason,omitempty"`
+}
+
+// LyricsVariant is one addressable playback representation. PlaybackIndex is
+// advisory; the selection token is the exact retrieval address.
+type LyricsVariant struct {
+	PluginID      string                `xml:"pluginId,attr"              json:"pluginId"`
+	PluginName    string                `xml:"pluginName,attr,omitempty"  json:"pluginName,omitempty"`
+	Identity      LyricsVariantIdentity `xml:"identity"                   json:"identity"`
+	Selection     string                `xml:"selection,attr,omitempty"    json:"selection,omitempty"`
+	Provider      string                `xml:"provider,attr,omitempty"     json:"provider,omitempty"`
+	Language      string                `xml:"language,attr,omitempty"     json:"language,omitempty"`
+	Role          string                `xml:"role,attr,omitempty"         json:"role,omitempty"`
+	Format        string                `xml:"format,attr,omitempty"       json:"format,omitempty"`
+	PlaybackIndex int                   `xml:"playbackIndex,attr"          json:"playbackIndex"`
+	Original      LyricsOriginalInfo    `xml:"original"                    json:"original"`
+	Match         *LyricsMatch          `xml:"match,omitempty"             json:"match,omitempty"`
 }
 
 type OpenSubsonicExtension struct {

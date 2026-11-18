@@ -20,6 +20,24 @@ type Agent struct {
 	Name string `structs:"name,omitempty" json:"name,omitempty"`
 }
 
+type LyricsSourceType string
+
+const (
+	LyricsSourceEmbedded LyricsSourceType = "embedded"
+	LyricsSourceSidecar  LyricsSourceType = "sidecar"
+	LyricsSourcePlugin   LyricsSourceType = "plugin"
+)
+
+// LyricsSource describes where Navidrome resolved a lyric. Name identifies a
+// plugin, while Provider identifies an optional upstream used by that plugin.
+type LyricsSource struct {
+	Type     LyricsSourceType `structs:"type"               json:"type"`
+	Name     string           `structs:"name,omitempty"     json:"name,omitempty"`
+	PluginID string           `structs:"pluginId,omitempty" json:"pluginId,omitempty"`
+	Provider string           `structs:"provider,omitempty" json:"provider,omitempty"`
+	Format   string           `structs:"format,omitempty"   json:"format,omitempty"`
+}
+
 type Line struct {
 	Start *int64 `structs:"start,omitempty" json:"start,omitempty"`
 	End   *int64 `structs:"end,omitempty"   json:"end,omitempty"`
@@ -28,14 +46,19 @@ type Line struct {
 }
 
 type Lyrics struct {
-	DisplayArtist string  `structs:"displayArtist,omitempty" json:"displayArtist,omitempty"`
-	DisplayTitle  string  `structs:"displayTitle,omitempty"  json:"displayTitle,omitempty"`
-	Kind          string  `structs:"kind,omitempty"          json:"kind,omitempty"`
-	Lang          string  `structs:"lang"                    json:"lang"`
-	Agents        []Agent `structs:"agents,omitempty"       json:"agents,omitempty"`
-	Line          []Line  `structs:"line"                    json:"line"`
-	Offset        *int64  `structs:"offset,omitempty"        json:"offset,omitempty"`
-	Synced        bool    `structs:"synced"                  json:"synced"`
+	DisplayArtist string                 `structs:"displayArtist,omitempty" json:"displayArtist,omitempty"`
+	DisplayTitle  string                 `structs:"displayTitle,omitempty"  json:"displayTitle,omitempty"`
+	Kind          string                 `structs:"kind,omitempty"          json:"kind,omitempty"`
+	Lang          string                 `structs:"lang"                    json:"lang"`
+	Agents        []Agent                `structs:"agents,omitempty"       json:"agents,omitempty"`
+	Line          []Line                 `structs:"line"                    json:"line"`
+	Offset        *int64                 `structs:"offset,omitempty"        json:"offset,omitempty"`
+	Source        *LyricsSource          `structs:"source,omitempty"        json:"source,omitempty"`
+	Variant       *LyricsVariantIdentity `structs:"variant,omitempty"       json:"variant,omitempty"`
+	Local         *LyricsLocalIdentity   `structs:"local,omitempty"         json:"local,omitempty"`
+	Selection     string                 `structs:"selection,omitempty"     json:"selection,omitempty"`
+	Match         *LyricsMatch           `structs:"match,omitempty"         json:"match,omitempty"`
+	Synced        bool                   `structs:"synced"                  json:"synced"`
 }
 
 // Lyric kinds, as defined by the OpenSubsonic songLyrics v2 contract. These are
@@ -67,6 +90,13 @@ func (l Lyrics) EffectiveKind() string {
 }
 
 type LyricList []Lyrics
+
+// LyricsResult is the typed enhanced result: playable entries plus attributed
+// evidence that is not a lyric entry.
+type LyricsResult struct {
+	Lyrics   LyricList
+	Evidence []LyricsEvidence
+}
 
 // MarshalJSON keeps the lyrics column invariant: empty/nil serializes to [], never null.
 func (ll LyricList) MarshalJSON() ([]byte, error) {

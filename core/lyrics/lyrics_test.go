@@ -6,6 +6,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
+	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/core/lyrics"
@@ -19,6 +23,17 @@ import (
 var _ = Describe("Lyrics", func() {
 	var mf model.MediaFile
 	var ctx context.Context
+
+	expectLyricsWithSource := func(actual, expected model.LyricList, source model.LyricsSource) {
+		GinkgoHelper()
+		withoutSource := make(model.LyricList, len(actual))
+		copy(withoutSource, actual)
+		for i := range withoutSource {
+			Expect(withoutSource[i].Source).To(Equal(&source))
+			withoutSource[i].Source = nil
+		}
+		Expect(withoutSource).To(Equal(expected))
+	}
 
 	embeddedLyrics := model.LyricList{
 		model.Lyrics{
@@ -160,19 +175,19 @@ var _ = Describe("Lyrics", func() {
 		ctx = GinkgoT().Context()
 	})
 
-	DescribeTable("Lyrics Priority", func(priority string, expected model.LyricList) {
+	DescribeTable("Lyrics Priority", func(priority string, expected model.LyricList, source model.LyricsSource) {
 		conf.Update(func(c *conf.Options) { c.LyricsPriority = priority })
 		svc := lyrics.NewLyrics(nil, nil)
 		list, err := svc.GetLyrics(ctx, &mf)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(list).To(Equal(expected))
+		expectLyricsWithSource(list, expected, source)
 	},
-		Entry("embedded > lrc > txt", "embedded,.lrc,.txt", embeddedLyrics),
-		Entry("lrc > embedded > txt", ".lrc,embedded,.txt", syncedLyrics),
-		Entry("elrc > lrc > embedded", ".elrc,.lrc,embedded", elrcLyrics),
-		Entry("srt > txt > embedded", ".srt,.txt,embedded", srtLyrics),
-		Entry("txt > lrc > embedded", ".txt,.lrc,embedded", unsyncedLyrics),
-		Entry("ttml > elrc > lrc > srt > embedded", ".ttml,.elrc,.lrc,.srt,embedded", ttmlLyrics))
+		Entry("embedded > lrc > txt", "embedded,.lrc,.txt", embeddedLyrics, model.LyricsSource{Type: model.LyricsSourceEmbedded}),
+		Entry("lrc > embedded > txt", ".lrc,embedded,.txt", syncedLyrics, model.LyricsSource{Type: model.LyricsSourceSidecar, Format: "lrc"}),
+		Entry("elrc > lrc > embedded", ".elrc,.lrc,embedded", elrcLyrics, model.LyricsSource{Type: model.LyricsSourceSidecar, Format: "elrc"}),
+		Entry("srt > txt > embedded", ".srt,.txt,embedded", srtLyrics, model.LyricsSource{Type: model.LyricsSourceSidecar, Format: "srt"}),
+		Entry("txt > lrc > embedded", ".txt,.lrc,embedded", unsyncedLyrics, model.LyricsSource{Type: model.LyricsSourceSidecar, Format: "txt"}),
+		Entry("ttml > elrc > lrc > srt > embedded", ".ttml,.elrc,.lrc,.srt,embedded", ttmlLyrics, model.LyricsSource{Type: model.LyricsSourceSidecar, Format: "ttml"}))
 
 	It("resolves source priority across duplicate media files", func() {
 		conf.Update(func(c *conf.Options) { c.LyricsPriority = ".ttml,embedded" })
@@ -194,7 +209,10 @@ var _ = Describe("Lyrics", func() {
 
 		list, err := svc.GetLyricsByArtistTitle(ctx, "Rick Astley", "Never Gonna Give You Up")
 		Expect(err).ToNot(HaveOccurred())
-		Expect(list).To(Equal(ttmlLyrics))
+		expectLyricsWithSource(list, ttmlLyrics, model.LyricsSource{
+			Type:   model.LyricsSourceSidecar,
+			Format: "ttml",
+		})
 	})
 
 	It("preserves configured sidecar suffix casing on case-sensitive filesystems", func() {
@@ -287,7 +305,9 @@ var _ = Describe("Lyrics", func() {
 				svc := lyrics.NewLyrics(nil, nil)
 				list, err := svc.GetLyrics(ctx, &mf)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(list).To(Equal(embeddedLyrics))
+				expectLyricsWithSource(list, embeddedLyrics, model.LyricsSource{
+					Type: model.LyricsSourceEmbedded,
+				})
 			})
 
 			It("should return nothing if error happens when trying to parse file", func() {
@@ -314,7 +334,10 @@ var _ = Describe("Lyrics", func() {
 			svc := lyrics.NewLyrics(nil, mockLoader)
 			list, err := svc.GetLyrics(ctx, &mf)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(list).To(Equal(unsyncedLyrics))
+			expectLyricsWithSource(list, unsyncedLyrics, model.LyricsSource{
+				Type: model.LyricsSourcePlugin,
+				Name: "test-lyrics-plugin",
+			})
 		})
 
 		It("should try plugin after embedded returns nothing", func() {
@@ -324,7 +347,10 @@ var _ = Describe("Lyrics", func() {
 			svc := lyrics.NewLyrics(nil, mockLoader)
 			list, err := svc.GetLyrics(ctx, &mf)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(list).To(Equal(unsyncedLyrics))
+			expectLyricsWithSource(list, unsyncedLyrics, model.LyricsSource{
+				Type: model.LyricsSourcePlugin,
+				Name: "test-lyrics-plugin",
+			})
 		})
 
 		It("should skip plugin if embedded has lyrics", func() {
@@ -333,7 +359,49 @@ var _ = Describe("Lyrics", func() {
 			svc := lyrics.NewLyrics(nil, mockLoader)
 			list, err := svc.GetLyrics(ctx, &mf)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(list).To(Equal(embeddedLyrics)) // embedded wins
+			expectLyricsWithSource(list, embeddedLyrics, model.LyricsSource{
+				Type: model.LyricsSourceEmbedded,
+			})
+		})
+
+		It("returns every source-tagged variant in order", func() {
+			conf.Update(func(c *conf.Options) { c.LyricsPriority = "test-lyrics-plugin" })
+			mockLoader.lyrics = model.LyricList{
+				{
+					Lang:   "eng",
+					Synced: true,
+					Line:   []model.Line{{Value: "first"}},
+					Source: &model.LyricsSource{
+						Type: model.LyricsSourcePlugin, Name: "test-lyrics-plugin",
+						Provider: "NetEase", Format: "elrc",
+					},
+				},
+				{
+					Lang:   "eng",
+					Synced: true,
+					Line:   []model.Line{{Value: "second"}},
+					Source: &model.LyricsSource{
+						Type: model.LyricsSourcePlugin, Name: "test-lyrics-plugin",
+						Provider: "LRCLib", Format: "lrc",
+					},
+				},
+			}
+			svc := lyrics.NewLyrics(nil, mockLoader)
+			list, err := svc.GetLyrics(ctx, &mf)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(list).To(HaveLen(2))
+			Expect(*list[0].Source).To(Equal(model.LyricsSource{
+				Type: model.LyricsSourcePlugin, Name: "test-lyrics-plugin",
+				Provider: "NetEase", Format: "elrc",
+			}))
+			Expect(*list[1].Source).To(Equal(model.LyricsSource{
+				Type: model.LyricsSourcePlugin, Name: "test-lyrics-plugin",
+				Provider: "LRCLib", Format: "lrc",
+			}))
+			// Legacy single-lyric consumers keep serving the first variant.
+			main, ok := list.Main()
+			Expect(ok).To(BeTrue())
+			Expect(main.Line[0].Value).To(Equal("first"))
 		})
 
 		It("should skip unknown plugin names gracefully", func() {
@@ -342,7 +410,9 @@ var _ = Describe("Lyrics", func() {
 			svc := lyrics.NewLyrics(nil, mockLoader)
 			list, err := svc.GetLyrics(ctx, &mf)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(list).To(Equal(embeddedLyrics)) // falls through to embedded
+			expectLyricsWithSource(list, embeddedLyrics, model.LyricsSource{
+				Type: model.LyricsSourceEmbedded,
+			})
 		})
 
 		It("should preserve plugin name case from config", func() {
@@ -352,7 +422,10 @@ var _ = Describe("Lyrics", func() {
 			svc := lyrics.NewLyrics(nil, mockLoader)
 			list, err := svc.GetLyrics(ctx, &mf)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(list).To(Equal(unsyncedLyrics))
+			expectLyricsWithSource(list, unsyncedLyrics, model.LyricsSource{
+				Type: model.LyricsSourcePlugin,
+				Name: "MyLyricsPlugin",
+			})
 		})
 
 		It("should handle plugin error gracefully", func() {
@@ -361,8 +434,31 @@ var _ = Describe("Lyrics", func() {
 			svc := lyrics.NewLyrics(nil, mockLoader)
 			list, err := svc.GetLyrics(ctx, &mf)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(list).To(Equal(embeddedLyrics)) // falls through to embedded
+			expectLyricsWithSource(list, embeddedLyrics, model.LyricsSource{
+				Type: model.LyricsSourceEmbedded,
+			})
 		})
+
+		It("should return a plugin error when no later source has lyrics", func() {
+			conf.Update(func(c *conf.Options) { c.LyricsPriority = "test-lyrics-plugin,embedded" })
+			mf.Lyrics = ""
+			mockLoader.err = errors.New("remote lyrics cooldown active for 30s")
+			svc := lyrics.NewLyrics(nil, mockLoader)
+
+			list, err := svc.GetLyrics(ctx, &mf)
+
+			Expect(list).To(BeEmpty())
+			Expect(err).To(MatchError("remote lyrics cooldown active for 30s"))
+		})
+	})
+
+	It("does not classify malformed mixed-case embedded lyrics as a plugin failure", func() {
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "Embedded" })
+		mf.Lyrics = "{malformed json"
+		svc := lyrics.NewLyrics(nil, nil)
+		list, err := svc.GetLyrics(ctx, &mf)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list).To(BeEmpty())
 	})
 
 	Context("caching", func() {
@@ -383,7 +479,9 @@ var _ = Describe("Lyrics", func() {
 
 			list, err := svc.GetLyrics(ctx, &mf)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(list).To(Equal(unsyncedLyrics))
+			expectLyricsWithSource(list, unsyncedLyrics, model.LyricsSource{
+				Type: model.LyricsSourcePlugin, Name: "test-lyrics-plugin",
+			})
 			Expect(mockLoader.calls).To(Equal(1))
 		})
 
@@ -396,14 +494,14 @@ var _ = Describe("Lyrics", func() {
 			Expect(mockLoader.calls).To(Equal(1))
 		})
 
-		It("caches a plugin error as a miss, since some plugins report no lyrics as an error", func() {
+		It("does not retain a plugin error and retries it on the next request", func() {
 			mockLoader.err = errors.New("no lyrics found from any provider")
 			for range 2 {
 				list, err := svc.GetLyrics(ctx, &mf)
-				Expect(err).ToNot(HaveOccurred())
+				Expect(err).To(MatchError("no lyrics found from any provider"))
 				Expect(list).To(BeEmpty())
 			}
-			Expect(mockLoader.calls).To(Equal(1))
+			Expect(mockLoader.calls).To(Equal(2))
 		})
 
 		It("looks up each track separately", func() {
@@ -421,11 +519,15 @@ var _ = Describe("Lyrics", func() {
 
 			list, err := svc.GetLyrics(cancelled, &mf)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(list).To(Equal(unsyncedLyrics))
+			expectLyricsWithSource(list, unsyncedLyrics, model.LyricsSource{
+				Type: model.LyricsSourcePlugin, Name: "test-lyrics-plugin",
+			})
 
 			list, err = svc.GetLyrics(ctx, &mf)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(list).To(Equal(unsyncedLyrics))
+			expectLyricsWithSource(list, unsyncedLyrics, model.LyricsSource{
+				Type: model.LyricsSourcePlugin, Name: "test-lyrics-plugin",
+			})
 			Expect(mockLoader.calls).To(Equal(1))
 		})
 
@@ -433,6 +535,109 @@ var _ = Describe("Lyrics", func() {
 			_, err := svc.GetLyrics(ctx, &mf)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(mockLoader.hadDeadline).To(BeTrue())
+		})
+
+		It("does not retain a detailed result, so a delayed provider upgrade is visible", func() {
+			first, err := svc.GetLyricsVariantsResult(ctx, &mf, false)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(first.Lyrics).To(BeEmpty())
+
+			mockLoader.detailed = model.LyricsResult{Lyrics: unsyncedLyrics}
+			second, err := svc.GetLyricsVariantsResult(ctx, &mf, false)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(second.Lyrics).To(HaveLen(1))
+			Expect(mockLoader.calls).To(Equal(2))
+		})
+
+		It("does not retain an existing detailed set when the provider adds another entry", func() {
+			mockLoader.detailed = model.LyricsResult{Lyrics: unsyncedLyrics[:1]}
+			first, err := svc.GetLyricsVariantsResult(ctx, &mf, false)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(first.Lyrics).To(HaveLen(1))
+
+			expanded := append(model.LyricList{}, unsyncedLyrics...)
+			expanded = append(expanded, model.Lyrics{
+				Lang: "eng", Line: []model.Line{{Value: "late provider variant"}},
+			})
+			mockLoader.detailed = model.LyricsResult{Lyrics: expanded}
+			second, err := svc.GetLyricsVariantsResult(ctx, &mf, false)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(second.Lyrics).To(HaveLen(2))
+			Expect(mockLoader.calls).To(Equal(2))
+		})
+
+		It("keeps legacy and detailed result shapes disjoint", func() {
+			mockLoader.lyrics = unsyncedLyrics
+			legacy, err := svc.GetLyrics(ctx, &mf)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(legacy).To(HaveLen(1))
+
+			mockLoader.detailed = model.LyricsResult{
+				Lyrics:   unsyncedLyrics,
+				Evidence: []model.LyricsEvidence{{Kind: "match", Provider: "LRCLib"}},
+			}
+			detailed, err := svc.GetLyricsVariantsResult(ctx, &mf, false)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(detailed.Lyrics).To(HaveLen(1))
+			Expect(detailed.Evidence).To(HaveLen(1))
+			Expect(mockLoader.calls).To(Equal(2))
+
+			// The legacy cache hit must not be populated or consumed by the
+			// detailed path.
+			_, err = svc.GetLyrics(ctx, &mf)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(mockLoader.calls).To(Equal(2))
+		})
+
+		It("stamps source on every read without mutating the cached result", func() {
+			mockLoader.lyrics = unsyncedLyrics
+			first, err := svc.GetLyrics(ctx, &mf)
+			Expect(err).ToNot(HaveOccurred())
+			first[0].Source.Name = "mutated"
+
+			second, err := svc.GetLyrics(ctx, &mf)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(second[0].Source.Name).To(Equal("test-lyrics-plugin"))
+			Expect(mockLoader.calls).To(Equal(1))
+		})
+
+		It("preserves detailed evidence, variant identity, and source without retaining it", func() {
+			identity := model.LyricsVariantIdentity{
+				Version: 1, Instance: "plugin:track", Recording: "recording",
+				Language: "eng", Role: model.LyricKindMain, Format: "lrc",
+			}
+			match := &model.LyricsMatch{Status: model.LyricsMatchValidated}
+			mockLoader.detailed = model.LyricsResult{
+				Lyrics: model.LyricList{{
+					Lang: "eng", Variant: &identity, Match: match, Selection: "selection",
+					Line: []model.Line{{Value: "detailed"}},
+				}},
+				Evidence: []model.LyricsEvidence{{
+					PluginID: "test-lyrics-plugin", Kind: "match", Provider: "LRCLib", Match: match,
+				}},
+			}
+			for range 2 {
+				result, err := svc.GetLyricsVariantsResult(ctx, &mf, false)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(result.Lyrics).To(HaveLen(1))
+				Expect(result.Lyrics[0].Variant).To(Equal(&identity))
+				Expect(result.Lyrics[0].Match).To(Equal(match))
+				Expect(result.Lyrics[0].Source).To(Equal(&model.LyricsSource{
+					Type: model.LyricsSourcePlugin, Name: "test-lyrics-plugin",
+				}))
+				Expect(result.Evidence).To(HaveLen(1))
+				Expect(result.Evidence[0].Kind).To(Equal("match"))
+			}
+			Expect(mockLoader.calls).To(Equal(2))
+		})
+
+		It("does not retain or rewrite a detailed provider cooldown error", func() {
+			mockLoader.err = errors.New("remote lyrics cooldown active for 30s")
+			for range 2 {
+				_, err := svc.GetLyricsVariantsResult(ctx, &mf, false)
+				Expect(err).To(MatchError("remote lyrics cooldown active for 30s"))
+			}
+			Expect(mockLoader.calls).To(Equal(2))
 		})
 	})
 
@@ -482,6 +687,7 @@ var _ = Describe("Lyrics", func() {
 
 type mockPluginLoader struct {
 	lyrics      model.LyricList
+	detailed    model.LyricsResult
 	err         error
 	notFound    bool
 	pluginName  string // expected plugin name (exact match, like real manager)
@@ -518,4 +724,299 @@ func (m *mockLyricsProvider) GetLyrics(ctx context.Context, _ *model.MediaFile) 
 		return nil, err
 	}
 	return m.loader.lyrics, m.loader.err
+}
+
+func (m *mockLyricsProvider) GetLyricsDetailedResult(ctx context.Context, _ *model.MediaFile) (model.LyricsResult, error) {
+	m.loader.calls++
+	_, m.loader.hadDeadline = ctx.Deadline()
+	if err := ctx.Err(); err != nil {
+		return model.LyricsResult{}, err
+	}
+	if m.loader.detailed.Lyrics == nil && len(m.loader.detailed.Evidence) == 0 {
+		return model.LyricsResult{Lyrics: m.loader.lyrics}, m.loader.err
+	}
+	return m.loader.detailed, m.loader.err
+}
+
+type variantPluginLoader map[string]lyrics.Provider
+
+func (m variantPluginLoader) LoadLyricsProvider(name string) (lyrics.Provider, bool) {
+	provider, ok := m[name]
+	return provider, ok
+}
+
+type variantProvider func(context.Context, *model.MediaFile) (model.LyricList, error)
+
+func (f variantProvider) GetLyrics(ctx context.Context, mf *model.MediaFile) (model.LyricList, error) {
+	return f(ctx, mf)
+}
+
+func TestLyricsProviderErrors(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		enhanced   bool
+		allSources bool
+	}{
+		{name: "legacy lookup"},
+		{name: "initial variant lookup", enhanced: true},
+		{name: "all-source discovery", enhanced: true, allSources: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			conf.Update(func(c *conf.Options) { c.LyricsPriority = "LongCooldown,ShortCooldown,embedded" })
+			longErr := errors.New("first provider cooldown active for 120s")
+			shortErr := errors.New("second provider retry after 5s")
+			loader := variantPluginLoader{
+				"LongCooldown": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+					return nil, longErr
+				}),
+				"ShortCooldown": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+					return nil, shortErr
+				}),
+			}
+			svc := lyrics.NewLyrics(nil, loader)
+			lookup := func(mf *model.MediaFile) (model.LyricList, error) {
+				if tt.enhanced {
+					return svc.GetLyricsVariants(t.Context(), mf, tt.allSources)
+				}
+				return svc.GetLyrics(t.Context(), mf)
+			}
+			list, err := lookup(&model.MediaFile{})
+			g.Expect(list).To(BeEmpty())
+			g.Expect(err).To(MatchError(longErr.Error() + "\n" + shortErr.Error()))
+			g.Expect(errors.Is(err, longErr)).To(BeTrue())
+			g.Expect(errors.Is(err, shortErr)).To(BeTrue())
+
+			list, err = lookup(&model.MediaFile{Lyrics: `[{"lang":"eng","line":[{"value":"Local words"}]}]`})
+			g.Expect(list).To(HaveLen(1))
+			g.Expect(list[0].Source.Type).To(Equal(model.LyricsSourceEmbedded))
+			if tt.enhanced {
+				g.Expect(err).To(MatchError(longErr.Error() + "\n" + shortErr.Error()))
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+		})
+	}
+}
+
+func TestLyricsVariants(t *testing.T) {
+	mf := &model.MediaFile{Lyrics: `[{"lang":"eng","line":[{"value":"Local words"}]}]`}
+	remote := model.LyricList{{Lang: "eng", Line: []model.Line{{Value: "Remote words"}}}}
+
+	t.Run("initial plugin winner includes local lyrics and skips later plugins", func(t *testing.T) {
+		g := NewWithT(t)
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "OtherPlugin,embedded,UnusedPlugin" })
+		loader := variantPluginLoader{
+			"OtherPlugin": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+				return remote, nil
+			}),
+			"UnusedPlugin": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+				t.Fatal("initial lookup must short-circuit remote sources")
+				return nil, nil
+			}),
+		}
+		list, err := lyrics.NewLyrics(nil, loader).GetLyricsVariants(t.Context(), mf, false)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(list).To(HaveLen(2))
+		g.Expect(list[0].Source.Name).To(Equal("OtherPlugin"))
+		g.Expect(list[1].Source.Type).To(Equal(model.LyricsSourceEmbedded))
+	})
+
+	t.Run("concurrent detailed lookups share one call but do not retain it", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			g := NewWithT(t)
+			conf.Update(func(c *conf.Options) { c.LyricsPriority = "Shared" })
+			started := make(chan struct{})
+			release := make(chan struct{})
+			var calls atomic.Int32
+			loader := variantPluginLoader{"Shared": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+				if calls.Add(1) == 1 {
+					close(started)
+				}
+				<-release
+				return remote, nil
+			})}
+			svc := lyrics.NewLyrics(nil, loader)
+
+			type lookupResult struct {
+				list model.LyricList
+				err  error
+			}
+			results := make(chan lookupResult, 2)
+			for range 2 {
+				go func() {
+					list, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
+					results <- lookupResult{list: list, err: err}
+				}()
+			}
+			<-started
+			synctest.Wait()
+			g.Expect(calls.Load()).To(Equal(int32(1)), "both callers must join one flight")
+
+			close(release)
+			synctest.Wait()
+			for range 2 {
+				select {
+				case result := <-results:
+					g.Expect(result.err).NotTo(HaveOccurred())
+					g.Expect(result.list).To(HaveLen(1))
+				default:
+					t.Fatal("shared lookup did not deliver both results")
+				}
+			}
+
+			// The load was shared but not retained: a later caller loads again.
+			_, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(calls.Load()).To(Equal(int32(2)))
+		})
+	})
+
+	t.Run("a canceled detailed caller stops waiting without aborting an active caller", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			g := NewWithT(t)
+			conf.Update(func(c *conf.Options) { c.LyricsPriority = "Shared" })
+			started := make(chan struct{})
+			release := make(chan struct{})
+			var calls atomic.Int32
+			loader := variantPluginLoader{"Shared": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+				if calls.Add(1) == 1 {
+					close(started)
+				}
+				<-release
+				return remote, nil
+			})}
+			svc := lyrics.NewLyrics(nil, loader)
+
+			type lookupResult struct {
+				list model.LyricList
+				err  error
+			}
+			canceledCtx, cancel := context.WithCancel(t.Context())
+			canceledResult := make(chan error, 1)
+			go func() {
+				_, err := svc.GetLyricsVariants(canceledCtx, &model.MediaFile{}, false)
+				canceledResult <- err
+			}()
+			<-started
+
+			activeResult := make(chan lookupResult, 1)
+			go func() {
+				list, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
+				activeResult <- lookupResult{list: list, err: err}
+			}()
+			synctest.Wait()
+			g.Expect(calls.Load()).To(Equal(int32(1)), "active caller must join the leader's flight")
+
+			cancel()
+			synctest.Wait()
+			select {
+			case err := <-canceledResult:
+				g.Expect(errors.Is(err, context.Canceled)).To(BeTrue(), "canceled caller error: %v", err)
+			default:
+				t.Fatal("canceled caller did not stop waiting promptly")
+			}
+
+			close(release)
+			synctest.Wait()
+			select {
+			case active := <-activeResult:
+				g.Expect(active.err).NotTo(HaveOccurred())
+				g.Expect(active.list).To(HaveLen(1))
+			default:
+				t.Fatal("active caller did not receive the shared result")
+			}
+			g.Expect(calls.Load()).To(Equal(int32(1)))
+
+			// The load was shared but not retained: a later caller loads again.
+			_, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(calls.Load()).To(Equal(int32(2)))
+		})
+	})
+
+	t.Run("concurrent discovery preserves priority and isolates failures", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			g := NewWithT(t)
+			conf.Update(func(c *conf.Options) { c.LyricsPriority = "First,Failing,embedded,Second,First,Missing" })
+			started := make(chan struct{}, 2)
+			release := make(chan struct{})
+			go func() {
+				<-started
+				<-started
+				close(release)
+			}()
+			provider := func(context.Context, *model.MediaFile) (model.LyricList, error) {
+				started <- struct{}{}
+				// Both sources must start before either can finish.
+				<-release
+				return remote, nil
+			}
+			loader := variantPluginLoader{
+				"First": variantProvider(provider), "Second": variantProvider(provider),
+				"Failing": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+					return nil, errors.New("provider unavailable")
+				}),
+			}
+			list, err := lyrics.NewLyrics(nil, loader).GetLyricsVariants(t.Context(), mf, true)
+			g.Expect(err).To(MatchError("provider unavailable"))
+			g.Expect(list).To(HaveLen(3))
+			g.Expect(list[0].Source.Name).To(Equal("First"))
+			g.Expect(list[1].Source.Type).To(Equal(model.LyricsSourceEmbedded))
+			g.Expect(list[2].Source.Name).To(Equal("Second"))
+		})
+	})
+
+	t.Run("ordinary slow plugins can finish without a background cache", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			g := NewWithT(t)
+			conf.Update(func(c *conf.Options) { c.LyricsPriority = "embedded,SlowPlugin" })
+			loader := variantPluginLoader{"SlowPlugin": variantProvider(func(ctx context.Context, _ *model.MediaFile) (model.LyricList, error) {
+				select {
+				case <-time.After(3 * time.Second):
+					return remote, nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			})}
+			svc := lyrics.NewLyrics(nil, loader)
+			start := time.Now()
+			initial, err := svc.GetLyricsVariants(t.Context(), mf, false)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(initial).To(HaveLen(1))
+			g.Expect(time.Since(start)).To(BeZero())
+			all, err := svc.GetLyricsVariants(t.Context(), mf, true)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(all).To(HaveLen(2))
+			g.Expect(all[1].Source.Name).To(Equal("SlowPlugin"))
+			g.Expect(time.Since(start)).To(Equal(3 * time.Second))
+		})
+	})
+
+	t.Run("a stuck plugin cannot hide local lyrics or cache a false miss", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			g := NewWithT(t)
+			conf.Update(func(c *conf.Options) { c.LyricsPriority = "embedded,StuckPlugin" })
+			release := make(chan struct{})
+			loader := variantPluginLoader{"StuckPlugin": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+				<-release // Deliberately ignore cancellation, as a faulty provider might.
+				return remote, nil
+			})}
+			svc := lyrics.NewLyrics(nil, loader)
+			list, err := svc.GetLyricsVariants(t.Context(), mf, true)
+			g.Expect(err).To(MatchError(context.DeadlineExceeded))
+			g.Expect(list).To(HaveLen(1))
+			_, err = svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, true)
+			g.Expect(err).To(MatchError(context.DeadlineExceeded))
+			close(release)
+		})
+	})
+
+	t.Run("caller cancellation is propagated", func(t *testing.T) {
+		g := NewWithT(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		_, err := lyrics.NewLyrics(nil, nil).GetLyricsVariants(ctx, mf, true)
+		g.Expect(err).To(MatchError(context.Canceled))
+	})
 }

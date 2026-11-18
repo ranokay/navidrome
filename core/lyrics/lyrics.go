@@ -2,7 +2,9 @@ package lyrics
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/Masterminds/squirrel"
@@ -11,6 +13,7 @@ import (
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/persistence"
 	"github.com/navidrome/navidrome/utils/cache"
+	"golang.org/x/sync/singleflight"
 )
 
 // maxLegacyLyricsCandidates bounds the duplicate window scanned by the legacy
@@ -19,9 +22,10 @@ import (
 const maxLegacyLyricsCandidates = 10
 
 const (
-	lyricsCacheSize   = 1000
-	lyricsCacheTTL    = 5 * time.Minute
-	lyricsLoadTimeout = time.Minute
+	lyricsCacheSize    = 1000
+	lyricsCacheTTL     = 5 * time.Minute
+	lyricsLoadTimeout  = time.Minute
+	detailedLoadBudget = 30 * time.Second
 )
 
 // Provider fetches lyrics for a single media file. It is the contract
@@ -34,7 +38,37 @@ type Provider interface {
 // priority.
 type Lyrics interface {
 	Provider
+	GetLyricsVariants(ctx context.Context, mf *model.MediaFile, allSources bool) (model.LyricList, error)
+	GetLyricsVariantsResult(ctx context.Context, mf *model.MediaFile, allSources bool) (model.LyricsResult, error)
 	GetLyricsByArtistTitle(ctx context.Context, artist, title string) (model.LyricList, error)
+	ListLyricsVariants(ctx context.Context, mf *model.MediaFile) ([]model.LyricsVariant, error)
+	ListLyricsVariantsResult(ctx context.Context, mf *model.MediaFile) ([]model.LyricsVariant, []model.LyricsEvidence, error)
+	GetLyricsOriginal(ctx context.Context, mf *model.MediaFile, plugin string, identity model.LyricsVariantIdentity) (model.LyricsOriginal, error)
+}
+
+// DetailedProvider is implemented by providers that expose every cached
+// playback representation with its addressable identity.
+type DetailedProvider interface {
+	Provider
+	GetLyricsDetailed(ctx context.Context, mf *model.MediaFile) (model.LyricList, error)
+}
+
+// DetailedResultProvider exposes typed evidence alongside enhanced playback.
+type DetailedResultProvider interface {
+	GetLyricsDetailedResult(ctx context.Context, mf *model.MediaFile) (model.LyricsResult, error)
+}
+
+// VariantsResultProvider exposes typed evidence alongside the variant listing.
+type VariantsResultProvider interface {
+	ListLyricsVariantsResult(ctx context.Context, mf *model.MediaFile) ([]model.LyricsVariant, []model.LyricsEvidence, error)
+}
+
+// OriginalsProvider is the optional plugin surface for variant listings and
+// exact source-native documents. Providers without it keep working.
+type OriginalsProvider interface {
+	DetailedProvider
+	ListLyricsVariants(ctx context.Context, mf *model.MediaFile) ([]model.LyricsVariant, error)
+	GetOriginal(ctx context.Context, mf *model.MediaFile, identity model.LyricsVariantIdentity) (model.LyricsOriginal, error)
 }
 
 // PluginLoader discovers and loads lyrics provider plugins.
@@ -46,6 +80,23 @@ type lyricsService struct {
 	ds           model.DataStore
 	pluginLoader PluginLoader
 	pluginCache  cache.SimpleCache[pluginKey, model.LyricList]
+	pluginOnce   sync.Once
+	// detailedLoads collapses concurrent detailed lookups. Detailed results are
+	// not retained: a provider can improve them after the response (for example
+	// from a background sweep), and clients poll them for upgrades.
+	detailedLoads singleflight.Group
+}
+
+// pluginCacheFor lazily starts the legacy cache. Detailed-only callers should not
+// pay for the cache's background goroutine.
+func (l *lyricsService) pluginCacheFor() cache.SimpleCache[pluginKey, model.LyricList] {
+	l.pluginOnce.Do(func() {
+		l.pluginCache = cache.NewSimpleCache[pluginKey, model.LyricList](cache.Options{
+			SizeLimit:  lyricsCacheSize,
+			DefaultTTL: lyricsCacheTTL,
+		})
+	})
+	return l.pluginCache
 }
 
 type pluginKey struct {
@@ -59,10 +110,6 @@ func NewLyrics(ds model.DataStore, pluginLoader PluginLoader) Lyrics {
 	return &lyricsService{
 		ds:           ds,
 		pluginLoader: pluginLoader,
-		pluginCache: cache.NewSimpleCache[pluginKey, model.LyricList](cache.Options{
-			SizeLimit:  lyricsCacheSize,
-			DefaultTTL: lyricsCacheTTL,
-		}),
 	}
 }
 
@@ -70,6 +117,121 @@ func NewLyrics(ds model.DataStore, pluginLoader PluginLoader) Lyrics {
 // order specified by conf.Server().LyricsPriority.
 func (l *lyricsService) GetLyrics(ctx context.Context, mf *model.MediaFile) (model.LyricList, error) {
 	return l.getLyricsForCandidates(ctx, []*model.MediaFile{mf})
+}
+
+// GetLyricsVariants includes every configured local source. The initial lookup
+// retains priority short-circuiting for plugins; allSources also queries the
+// remaining plugins, for background discovery while clients display lyrics.
+// Discovery can return both variants and an error when only some sources succeed.
+func (l *lyricsService) GetLyricsVariants(ctx context.Context, mf *model.MediaFile, allSources bool) (model.LyricList, error) {
+	result, err := l.GetLyricsVariantsResult(ctx, mf, allSources)
+	return result.Lyrics, err
+}
+
+func (l *lyricsService) GetLyricsVariantsResult(ctx context.Context, mf *model.MediaFile, allSources bool) (model.LyricsResult, error) {
+	if err := ctx.Err(); err != nil {
+		return model.LyricsResult{}, err
+	}
+	patterns := []string{}
+	seen := map[string]bool{}
+	for pattern := range strings.SplitSeq(conf.Server().LyricsPriority, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern != "" && !seen[pattern] {
+			patterns = append(patterns, pattern)
+			seen[pattern] = true
+		}
+	}
+
+	results := make([]sourceResult, len(patterns))
+	var discoveryErr error
+	if allSources {
+		results, discoveryErr = l.discoverSources(ctx, mf, patterns, true)
+	} else {
+		found := false
+		for i, pattern := range patterns {
+			if err := ctx.Err(); err != nil {
+				return model.LyricsResult{}, err
+			}
+			if found && !isLocalSource(pattern) {
+				continue
+			}
+			result, err := l.getLyricsFromSourceResult(ctx, mf, pattern, true)
+			results[i] = sourceResult{lyrics: result.Lyrics, evidence: result.Evidence, err: err}
+			found = found || (err == nil && len(result.Lyrics) > 0)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return model.LyricsResult{}, err
+	}
+	var variants model.LyricList
+	var evidence []model.LyricsEvidence
+	pluginErr := discoveryErr
+	partialErr := discoveryErr
+	for i, entry := range results {
+		if entry.err != nil {
+			partialErr = errors.Join(partialErr, entry.err)
+			log.Error(ctx, "error getting lyrics", "source", patterns[i], entry.err)
+			if !isLocalSource(patterns[i]) {
+				pluginErr = errors.Join(pluginErr, entry.err)
+			}
+			continue
+		}
+		variants = append(variants, entry.lyrics...)
+		evidence = append(evidence, entry.evidence...)
+	}
+	result := model.LyricsResult{Lyrics: variants, Evidence: evidence}
+	if len(variants) > 0 || len(evidence) > 0 {
+		if allSources || partialErr != nil {
+			return result, partialErr
+		}
+		return result, nil
+	}
+	return model.LyricsResult{}, pluginErr
+}
+
+// sourceResult retains source priority independently of completion order.
+type sourceResult struct {
+	index    int
+	lyrics   model.LyricList
+	evidence []model.LyricsEvidence
+	err      error
+}
+
+func (l *lyricsService) discoverSources(ctx context.Context, mf *model.MediaFile, patterns []string, detailed bool) ([]sourceResult, error) {
+	// Match the plugin host's normal call budget; providers need no special
+	// caching or fast-response protocol to participate in source discovery.
+	ctx, cancel := context.WithTimeout(ctx, detailedLoadBudget)
+	defer cancel()
+	results := make([]sourceResult, len(patterns))
+	completed := make(chan sourceResult, len(patterns))
+	for i, pattern := range patterns {
+		go func() {
+			result, err := l.getLyricsFromSourceResult(ctx, mf, pattern, detailed)
+			completed <- sourceResult{index: i, lyrics: result.Lyrics, evidence: result.Evidence, err: err}
+		}()
+	}
+	for remaining := len(patterns); remaining > 0; remaining-- {
+		select {
+		case entry := <-completed:
+			results[entry.index] = entry
+		case <-ctx.Done():
+			// Drain completed successes before returning partial results.
+			// Buffered sends let late providers exit after cancellation.
+			for {
+				select {
+				case entry := <-completed:
+					results[entry.index] = entry
+				default:
+					return results, ctx.Err()
+				}
+			}
+		}
+	}
+	return results, nil
+}
+
+func isLocalSource(pattern string) bool {
+	return strings.EqualFold(pattern, "embedded") || strings.HasPrefix(pattern, ".")
 }
 
 // GetLyricsByArtistTitle resolves lyrics for the legacy artist/title lookup,
@@ -108,6 +270,7 @@ func songsByArtistTitleWithLyricsFirst(artist, title string) model.QueryOptions 
 }
 
 func (l *lyricsService) getLyricsForCandidates(ctx context.Context, mediaFiles []*model.MediaFile) (model.LyricList, error) {
+	var pluginErr error
 	for pattern := range strings.SplitSeq(conf.Server().LyricsPriority, ",") {
 		pattern = strings.TrimSpace(pattern)
 		if pattern == "" {
@@ -119,9 +282,12 @@ func (l *lyricsService) getLyricsForCandidates(ctx context.Context, mediaFiles [
 				continue
 			}
 
-			lyricsList, err := l.getLyricsFromSource(ctx, mf, pattern)
+			lyricsList, err := l.getLyricsFromSource(ctx, mf, pattern, false)
 			if err != nil {
 				log.Error(ctx, "error getting lyrics", "source", pattern, err)
+				if !strings.EqualFold(pattern, "embedded") && !strings.HasPrefix(pattern, ".") {
+					pluginErr = errors.Join(pluginErr, err)
+				}
 				continue
 			}
 
@@ -131,16 +297,23 @@ func (l *lyricsService) getLyricsForCandidates(ctx context.Context, mediaFiles [
 		}
 	}
 
-	return nil, nil
+	return nil, pluginErr
 }
 
-func (l *lyricsService) getLyricsFromSource(ctx context.Context, mf *model.MediaFile, pattern string) (model.LyricList, error) {
+func (l *lyricsService) getLyricsFromSource(ctx context.Context, mf *model.MediaFile, pattern string, detailed bool) (model.LyricList, error) {
+	result, err := l.getLyricsFromSourceResult(ctx, mf, pattern, detailed)
+	return result.Lyrics, err
+}
+
+func (l *lyricsService) getLyricsFromSourceResult(ctx context.Context, mf *model.MediaFile, pattern string, detailed bool) (model.LyricsResult, error) {
 	switch {
 	case strings.EqualFold(pattern, "embedded"):
-		return fromEmbedded(ctx, mf)
+		list, err := fromEmbedded(ctx, mf)
+		return model.LyricsResult{Lyrics: list}, err
 	case strings.HasPrefix(pattern, "."):
-		return fromExternalFile(ctx, mf, pattern)
+		list, err := fromExternalFile(ctx, mf, pattern)
+		return model.LyricsResult{Lyrics: list}, err
 	default:
-		return l.fromPlugin(ctx, mf, pattern)
+		return l.fromPluginResult(ctx, mf, pattern, detailed)
 	}
 }

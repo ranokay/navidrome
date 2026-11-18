@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/navidrome/navidrome/consts"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
+	"github.com/navidrome/navidrome/model/request"
 	"github.com/navidrome/navidrome/resources"
 	"github.com/navidrome/navidrome/server/imghttp"
 	"github.com/navidrome/navidrome/server/subsonic/responses"
@@ -102,7 +104,8 @@ func (api *Router) GetLyrics(r *http.Request) (*responses.Subsonic, error) {
 	response.Lyrics = &lyricsResponse
 	structuredLyrics, err := api.lyrics.GetLyricsByArtistTitle(r.Context(), artist, title)
 	if err != nil {
-		return nil, err
+		log.Error(r.Context(), "Error getting lyrics", "artist", artist, "title", title, err)
+		return nil, lyricsClientError(err)
 	}
 
 	mainLyric, ok := structuredLyrics.Main()
@@ -133,15 +136,119 @@ func (api *Router) GetLyricsBySongId(r *http.Request) (*responses.Subsonic, erro
 		return nil, err
 	}
 
-	structuredLyrics, err := api.lyrics.GetLyrics(r.Context(), mediaFile)
+	enhanced, _ := req.Params(r).Bool("enhanced")
+	allSources, _ := req.Params(r).Bool("allSources")
+	var structuredLyrics model.LyricList
+	var evidence []model.LyricsEvidence
+	if enhanced {
+		var result model.LyricsResult
+		result, err = api.lyrics.GetLyricsVariantsResult(r.Context(), mediaFile, allSources)
+		structuredLyrics, evidence = result.Lyrics, result.Evidence
+	} else {
+		structuredLyrics, err = api.lyrics.GetLyrics(r.Context(), mediaFile)
+	}
+	if err != nil && (!enhanced || (len(structuredLyrics) == 0 && len(evidence) == 0)) {
+		log.Error(r.Context(), "Error getting lyrics", "id", id, err)
+		return nil, lyricsClientError(err)
+	}
+
+	response := newResponse()
+	personalList := structuredLyrics
+	var personal *responses.LyricsPersonal
+	if enhanced {
+		personalList, personal = api.applyPersonalForRequest(r.Context(), mediaFile, structuredLyrics, allSources)
+	}
+	response.LyricsList = buildLyricsList(mediaFile, personalList, evidence, enhanced, personal)
+	response.LyricsList.SourcesIncomplete = enhanced && err != nil
+	if enhanced {
+		response.LyricsList.RetryAfterSeconds = lyricsRetryAfterSeconds(err)
+	}
+
+	return response, nil
+}
+
+// GetLyricsVariants lists the addressable playback representations for one
+// track. It performs no fetch and never returns document bytes.
+func (api *Router) GetLyricsVariants(r *http.Request) (*responses.Subsonic, error) {
+	id, err := req.Params(r).String("id")
 	if err != nil {
 		return nil, err
 	}
-
-	enhanced, _ := req.Params(r).Bool("enhanced")
-
+	mediaFile, err := api.ds.MediaFile().Get(r.Context(), id)
+	if err != nil {
+		return nil, err
+	}
+	variants, evidence, err := api.lyrics.ListLyricsVariantsResult(r.Context(), mediaFile)
+	if err != nil {
+		log.Error(r.Context(), "Error listing lyrics variants", "id", id, err)
+	}
+	if user, ok := request.UserFrom(r.Context()); ok {
+		variants = api.filterRejectedVariants(r.Context(), user.ID, mediaFile.ID, variants)
+	}
 	response := newResponse()
-	response.LyricsList = buildLyricsList(mediaFile, structuredLyrics, enhanced)
-
+	response.LyricsVariants = buildLyricsVariants(variants, evidence)
 	return response, nil
+}
+
+// GetLyricsOriginal retrieves one exact source-native document for an opaque
+// selection token. Login and the existing media-file library authorization both
+// apply before the plugin is asked for bytes.
+func (api *Router) GetLyricsOriginal(w http.ResponseWriter, r *http.Request) (*responses.Subsonic, error) {
+	params := req.Params(r)
+	id, err := params.String("id")
+	if err != nil {
+		return nil, err
+	}
+	selection, err := params.String("selection")
+	if err != nil {
+		return nil, err
+	}
+	plugin, identity, ok := model.DecodeLyricsSelection(selection)
+	if !ok {
+		return nil, newError(responses.ErrorGeneric, "invalid lyrics selection")
+	}
+	mediaFile, err := api.ds.MediaFile().Get(r.Context(), id)
+	if err != nil {
+		return nil, err
+	}
+	original, err := api.lyrics.GetLyricsOriginal(r.Context(), mediaFile, plugin, identity)
+	if err != nil {
+		if errors.Is(err, model.ErrLyricsOriginalUnavailable) {
+			return nil, newError(responses.ErrorDataNotFound, "lyrics original unavailable")
+		}
+		// Provider diagnostics can contain credentials or local paths. Log them
+		// server-side and return a fixed client message, never raw text.
+		log.Error(r.Context(), "Error getting lyrics original", "id", id, "plugin", plugin, err)
+		return nil, newError(responses.ErrorGeneric, "error getting lyrics original")
+	}
+	w.Header().Set("Content-Type", original.MediaType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{
+		"filename": lyricsOriginalFilename(mediaFile, original.Extension),
+	}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	if _, err := w.Write(original.Document); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func lyricsOriginalFilename(mf *model.MediaFile, extension string) string {
+	base := strings.TrimSpace(mf.Title)
+	if artist := strings.TrimSpace(mf.Artist); artist != "" && base != "" {
+		base = artist + " - " + base
+	}
+	if base == "" {
+		base = "lyrics"
+	}
+	base = strings.Map(func(char rune) rune {
+		if char < 32 || strings.ContainsRune(`/\:*?"<>|`, char) {
+			return '_'
+		}
+		return char
+	}, base)
+	if runes := []rune(base); len(runes) > 120 {
+		base = string(runes[:120])
+	}
+	return base + extension
 }

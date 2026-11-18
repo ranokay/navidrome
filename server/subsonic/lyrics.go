@@ -1,8 +1,10 @@
 package subsonic
 
 import (
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/navidrome/navidrome/model"
@@ -13,7 +15,33 @@ import (
 // layer; its cue line is emitted before other agents sharing the same index.
 const agentRoleMain = "main"
 
-func buildLyricsList(mf *model.MediaFile, lyricsList model.LyricList, enhanced bool) *responses.LyricsList {
+var lyricsRetryAfterPattern = regexp.MustCompile(`(?i)(?:cooldown active for|retry after)\s+(\d+)s`)
+
+// lyricsRetryAfterSeconds exposes only a recognized cooldown duration to
+// clients that received partial lyrics, never provider diagnostics.
+func lyricsRetryAfterSeconds(err error) int {
+	if err == nil {
+		return 0
+	}
+	seconds := 0
+	for _, match := range lyricsRetryAfterPattern.FindAllStringSubmatch(err.Error(), -1) {
+		if duration, parseErr := strconv.Atoi(match[1]); parseErr == nil {
+			seconds = max(seconds, duration)
+		}
+	}
+	return seconds
+}
+
+// lyricsClientError sanitizes provider diagnostics. Only a fixed message and
+// the recognized numeric cooldown cross the client boundary.
+func lyricsClientError(err error) error {
+	if seconds := lyricsRetryAfterSeconds(err); seconds > 0 {
+		return newError(responses.ErrorGeneric, "error getting lyrics; retry after %ds", seconds)
+	}
+	return newError(responses.ErrorGeneric, "error getting lyrics")
+}
+
+func buildLyricsList(mf *model.MediaFile, lyricsList model.LyricList, evidence []model.LyricsEvidence, enhanced bool, personal *responses.LyricsPersonal) *responses.LyricsList {
 	filtered := lyricsList
 	if !enhanced {
 		// Without enhanced, only return main-kind entries (a blank kind is main).
@@ -29,7 +57,81 @@ func buildLyricsList(mf *model.MediaFile, lyricsList model.LyricList, enhanced b
 	for i, lyrics := range filtered {
 		lyricList[i] = buildStructuredLyric(mf, lyrics, enhanced)
 	}
-	return &responses.LyricsList{StructuredLyrics: lyricList}
+	var evidenceRows []responses.LyricsEvidence
+	if enhanced {
+		evidenceRows = buildLyricsEvidence(evidence)
+	}
+	return &responses.LyricsList{
+		StructuredLyrics:     lyricList,
+		InstrumentalEvidence: evidenceRows,
+		Personal:             personal,
+	}
+}
+
+// buildLyricsVariants maps the addressable variant listing. Documents are not
+// included; clients retrieve one exact selection separately.
+func buildLyricsVariants(variants []model.LyricsVariant, evidence []model.LyricsEvidence) *responses.LyricsVariants {
+	rows := make([]responses.LyricsVariant, 0, len(variants))
+	for _, variant := range variants {
+		rows = append(rows, responses.LyricsVariant{
+			PluginID:   variant.PluginID,
+			PluginName: variant.PluginName,
+			Identity: responses.LyricsVariantIdentity{
+				Version:   variant.Identity.Version,
+				Instance:  variant.Identity.Instance,
+				Recording: variant.Identity.Recording,
+				Language:  variant.Identity.Language,
+				Role:      variant.Identity.Role,
+				Format:    variant.Identity.Format,
+			},
+			Selection:     variant.Selection,
+			Provider:      variant.Provider,
+			Language:      variant.Language,
+			Role:          variant.Role,
+			Format:        variant.Format,
+			PlaybackIndex: variant.PlaybackIndex,
+			Original: responses.LyricsOriginalInfo{
+				Available:  variant.Original.Available,
+				Format:     variant.Original.Format,
+				Provenance: variant.Original.Provenance,
+				MediaType:  variant.Original.MediaType,
+				Extension:  variant.Original.Extension,
+				Size:       variant.Original.Size,
+				Reason:     variant.Original.Reason,
+			},
+			Match: buildLyricsMatch(variant.Match),
+		})
+	}
+	return &responses.LyricsVariants{Variants: rows, InstrumentalEvidence: buildLyricsEvidence(evidence)}
+}
+
+func buildLyricsMatch(match *model.LyricsMatch) *responses.LyricsMatch {
+	if match == nil {
+		return nil
+	}
+	reasons := make([]string, 0, len(match.Reasons))
+	reasons = append(reasons, match.Reasons...)
+	return &responses.LyricsMatch{
+		Status: match.Status, Reasons: reasons, DurationDelta: match.DurationDelta,
+		Recording: match.Recording, AutoSave: match.AutoSave,
+	}
+}
+
+func buildLyricsEvidence(evidence []model.LyricsEvidence) []responses.LyricsEvidence {
+	if len(evidence) == 0 {
+		return nil
+	}
+	out := make([]responses.LyricsEvidence, 0, len(evidence))
+	for _, entry := range evidence {
+		if !entry.Valid() {
+			continue
+		}
+		out = append(out, responses.LyricsEvidence{
+			PluginID: entry.PluginID, Kind: entry.Kind, Provider: entry.Provider,
+			Recording: entry.Recording, Match: buildLyricsMatch(entry.Match), Reason: entry.Reason,
+		})
+	}
+	return out
 }
 
 func buildStructuredLyric(mf *model.MediaFile, lyrics model.Lyrics, enhanced bool) responses.StructuredLyric {
@@ -56,6 +158,37 @@ func buildStructuredLyric(mf *model.MediaFile, lyrics model.Lyrics, enhanced boo
 
 	if enhanced {
 		structured.Kind = lyrics.EffectiveKind()
+		if lyrics.Source != nil && lyrics.Source.Type != "" {
+			structured.Source = &responses.LyricsSource{
+				Type:     string(lyrics.Source.Type),
+				Name:     lyrics.Source.Name,
+				PluginID: lyrics.Source.PluginID,
+				Provider: lyrics.Source.Provider,
+				Format:   lyrics.Source.Format,
+			}
+		}
+		if lyrics.Variant != nil {
+			structured.Variant = &responses.LyricsVariantIdentity{
+				Version:   lyrics.Variant.Version,
+				Instance:  lyrics.Variant.Instance,
+				Recording: lyrics.Variant.Recording,
+				Language:  lyrics.Variant.Language,
+				Role:      lyrics.Variant.Role,
+				Format:    lyrics.Variant.Format,
+			}
+			structured.Selection = lyrics.Selection
+		}
+		structured.Match = buildLyricsMatch(lyrics.Match)
+		if lyrics.Local != nil {
+			structured.Local = &responses.LyricsLocalIdentity{
+				Version:  lyrics.Local.Version,
+				Token:    lyrics.Local.Token,
+				Kind:     lyrics.Local.Kind,
+				Format:   lyrics.Local.Format,
+				Language: lyrics.Local.Language,
+				Role:     lyrics.Local.Role,
+			}
+		}
 		if len(cueLines) > 0 && len(agents.response) > 0 {
 			structured.Agents = agents.response
 		}
