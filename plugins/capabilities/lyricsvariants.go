@@ -18,14 +18,46 @@ type LyricsVariants interface {
 	GetLyricsOriginal(GetLyricsOriginalRequest) (GetLyricsOriginalResponse, error)
 }
 
+// Publication is live host call metadata. A plugin that sees it may use the
+// host's conditional publication protocol; a plugin that does not must keep
+// legacy writes or abstain from publishing.
+type Publication struct {
+	Generation string `json:"generation,omitempty"`
+	Token      string `json:"token,omitempty"`
+	CallID     string `json:"callId,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+}
+
+// Discovery identifies the committed enhanced snapshot.
+type Discovery struct {
+	Revision string `json:"revision,omitempty"`
+	Complete bool   `json:"complete,omitempty"`
+}
+
 type GetLyricsV2Request struct {
-	Track TrackInfo `json:"track"`
+	Track       TrackInfo    `json:"track"`
+	Refresh     bool         `json:"refresh,omitempty"`
+	Publication *Publication `json:"publication,omitempty"`
 }
 
 type GetLyricsV2Response struct {
-	Lyrics   []LyricsV2Text   `json:"lyrics"`
-	Source   *LyricsSource    `json:"source,omitempty"`
-	Evidence []LyricsEvidence `json:"evidence,omitempty"`
+	Lyrics    []LyricsV2Text   `json:"lyrics"`
+	Source    *LyricsSource    `json:"source,omitempty"`
+	Evidence  []LyricsEvidence `json:"evidence,omitempty"`
+	Discovery *Discovery       `json:"discovery,omitempty"`
+}
+
+// GetLyricsPublishedRequest is the optional classic-capable export. Old hosts
+// keep calling the required nd_lyrics_get_lyrics export.
+type GetLyricsPublishedRequest struct {
+	Track       TrackInfo    `json:"track"`
+	Publication *Publication `json:"publication,omitempty"`
+}
+
+type GetLyricsPublishedResponse struct {
+	Lyrics    []LyricsText  `json:"lyrics"`
+	Source    *LyricsSource `json:"source,omitempty"`
+	Discovery *Discovery    `json:"discovery,omitempty"`
 }
 
 // LyricsV2Text is one playback entry with its optional addressable identity.
@@ -102,8 +134,9 @@ type LyricsOriginalInfo struct {
 }
 
 type GetLyricsOriginalRequest struct {
-	Track    TrackInfo     `json:"track"`
-	Identity LyricsVariant `json:"identity"`
+	Track       TrackInfo     `json:"track"`
+	Identity    LyricsVariant `json:"identity"`
+	Publication *Publication  `json:"publication,omitempty"`
 }
 
 type GetLyricsOriginalResponse struct {

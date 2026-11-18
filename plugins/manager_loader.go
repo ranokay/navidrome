@@ -28,6 +28,8 @@ type serviceContext struct {
 	allUsers         bool     // If true, plugin can access all users
 	allowedLibraries []int    // Library IDs this plugin can access
 	allLibraries     bool     // If true, plugin can access all libraries
+	generation       string
+	kv               *kvstoreServiceImpl
 }
 
 // baseCtx returns the manager's lifecycle context, for host services that
@@ -115,10 +117,11 @@ var hostServices = []hostServiceEntry{
 		hasPermission: func(p *Permissions) bool { return p != nil && p.Kvstore != nil },
 		create: func(ctx *serviceContext) ([]extism.HostFunction, io.Closer, error) {
 			perm := ctx.permissions.Kvstore
-			service, err := newKVStoreService(ctx.baseCtx(), ctx.pluginName, perm)
+			service, err := newKVStoreService(ctx.baseCtx(), ctx.pluginName, perm, ctx.generation)
 			if err != nil {
 				return nil, nil, err
 			}
+			ctx.kv = service
 			return host.RegisterKVStoreHostFunctions(service), service, nil
 		},
 	},
@@ -390,6 +393,7 @@ func (m *Manager) loadPluginWithConfig(p *model.Plugin) error {
 		allUsers:         p.AllUsers,
 		allowedLibraries: allowedLibraries,
 		allLibraries:     p.AllLibraries,
+		generation:       randomPublicationToken(16),
 	}
 	for _, entry := range hostServices {
 		if entry.hasPermission(pkg.Manifest.Permissions) {
@@ -448,6 +452,8 @@ func (m *Manager) loadPluginWithConfig(p *model.Plugin) error {
 		libraries:      newLibraryAccess(allowedLibraries, p.AllLibraries),
 		fsConfig:       fsConfig,
 		lyricsSem:      make(chan struct{}, maxConcurrentLyricsCalls),
+		generation:     svcCtx.generation,
+		publication:    svcCtx.kv,
 	}
 	m.mu.Lock()
 	m.plugins[p.ID] = loadedPlugin

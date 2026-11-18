@@ -120,5 +120,14 @@ func (l *lyricsService) GetLyricsOriginal(ctx context.Context, mf *model.MediaFi
 	}
 	ctx, cancel := context.WithTimeout(ctx, variantOriginalTimeout)
 	defer cancel()
+	if publication, ok := provider.(PublicationProvider); ok && publication.PublicationGeneration() != "" {
+		original, supported, err := publication.GetOriginalWithPublication(
+			ctx, mf, identity,
+			model.LyricsPublication{Generation: publication.PublicationGeneration(), Kind: "original"},
+		)
+		if supported {
+			return original, err
+		}
+	}
 	return originals.GetOriginal(ctx, mf, identity)
 }

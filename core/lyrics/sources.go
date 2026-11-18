@@ -2,6 +2,8 @@ package lyrics
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -93,12 +95,12 @@ func (l *lyricsService) fromPlugin(ctx context.Context, mf *model.MediaFile, plu
 		return nil, nil
 	}
 
-	key := pluginKey{plugin: pluginName, mediaFileID: mf.ID}
+	key := pluginKey{plugin: pluginName, mediaFileID: mf.ID, trackKey: pluginTrackKey(mf)}
 	list, err := l.pluginCacheFor().GetWithLoader(key, func(pluginKey) (model.LyricList, time.Duration, error) {
 		// Concurrent callers share one load, so one cancelled request must not abort it for the others.
 		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lyricsLoadTimeout)
 		defer cancel()
-		lyricsList, err := provider.GetLyrics(loadCtx, mf)
+		lyricsList, err := l.classicPluginLyrics(loadCtx, provider, mf)
 		if err != nil {
 			log.Error(ctx, "Error getting lyrics from plugin", "plugin", pluginName, err)
 			return nil, 0, err
@@ -114,11 +116,40 @@ func (l *lyricsService) fromPlugin(ctx context.Context, mf *model.MediaFile, plu
 	return list, nil
 }
 
+// classicPluginLyrics negotiates publication for a classic cache miss. A
+// capable host never falls through to unconditional writes on denial; the
+// adapter/plugin returns a retryable error or the currently committed snapshot.
+func (l *lyricsService) classicPluginLyrics(ctx context.Context, provider Provider, mf *model.MediaFile) (model.LyricList, error) {
+	if publication, ok := provider.(PublicationProvider); ok && publication.PublicationGeneration() != "" {
+		call := model.LyricsPublication{Generation: publication.PublicationGeneration(), Kind: "classic"}
+		list, _, supported, err := publication.GetLyricsWithPublication(ctx, mf, call)
+		if err != nil {
+			return nil, err
+		}
+		if supported {
+			return list, nil
+		}
+	}
+	return provider.GetLyrics(ctx, mf)
+}
+
+func pluginTrackKey(mf *model.MediaFile) string {
+	title := strings.ToLower(strings.TrimSpace(mf.Title))
+	artist := strings.ToLower(strings.TrimSpace(mf.Artist))
+	if title == "" || artist == "" {
+		return ""
+	}
+	album := strings.ToLower(strings.TrimSpace(mf.Album))
+	duration := int64(mf.Duration + 0.5)
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%d", title, artist, album, duration)))
+	return hex.EncodeToString(sum[:])
+}
+
 // fromPluginResult resolves one plugin source. Legacy lookups use the bounded
 // upstream cache. Detailed lookups are single-flight but not retained: the
 // provider can improve them after responding (for example from a background
 // sweep), and enhanced clients poll for upgrades.
-func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFile, pluginName string, detailed bool) (model.LyricsResult, error) {
+func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFile, pluginName string, detailed, refresh bool) (model.LyricsResult, error) {
 	pluginSource := model.LyricsSource{Type: model.LyricsSourcePlugin, Name: pluginName}
 	if !detailed {
 		list, err := l.fromPlugin(ctx, mf, pluginName)
@@ -141,23 +172,40 @@ func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFil
 	if err := ctx.Err(); err != nil {
 		return model.LyricsResult{}, err
 	}
-	key := pluginName + "\x00" + mf.ID
-	resultChan := l.detailedLoads.DoChan(key, func() (any, error) {
-		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), detailedLoadBudget)
-		defer cancel()
+	var refreshPublication model.LyricsPublication
+	if refresh {
+		if publication, ok := provider.(PublicationProvider); ok && publication.PublicationGeneration() != "" {
+			call, supported, err := publication.StartPublication(ctx, mf, "refresh")
+			if err != nil {
+				return model.LyricsResult{}, err
+			}
+			if supported {
+				refreshPublication = call
+			}
+		}
+	}
+	key := pluginName + "\x00" + mf.ID + "\x00" + pluginTrackKey(mf)
+	result, err := l.detailed.do(ctx, key, refresh, func(loadCtx context.Context) (model.LyricsResult, error) {
+		if publication, ok := provider.(PublicationProvider); ok && publication.PublicationGeneration() != "" {
+			call := refreshPublication
+			if call.Generation == "" {
+				call = model.LyricsPublication{
+					Generation: publication.PublicationGeneration(),
+					Kind:       "normal",
+				}
+			}
+			loaded, supported, loadErr := publication.GetLyricsDetailedResultWithRefresh(loadCtx, mf, call, refresh)
+			if loadErr != nil {
+				return model.LyricsResult{}, loadErr
+			}
+			if supported {
+				return loaded, nil
+			}
+		}
 		return loadDetailedResult(loadCtx, provider, mf)
 	})
-	var result model.LyricsResult
-	select {
-	case <-ctx.Done():
-		// A canceled caller must stop waiting promptly. The in-flight load is
-		// shared with other callers and remains bounded by detailedLoadBudget.
-		return model.LyricsResult{}, ctx.Err()
-	case loaded := <-resultChan:
-		if loaded.Err != nil {
-			return model.LyricsResult{}, loaded.Err
-		}
-		result = loaded.Val.(model.LyricsResult)
+	if err != nil {
+		return model.LyricsResult{}, err
 	}
 	if len(result.Lyrics) > 0 {
 		log.Trace(ctx, "Retrieved lyrics from plugin", "plugin", pluginName, "count", len(result.Lyrics))

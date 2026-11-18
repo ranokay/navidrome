@@ -94,8 +94,25 @@ type LyricList []Lyrics
 // LyricsResult is the typed enhanced result: playable entries plus attributed
 // evidence that is not a lyric entry.
 type LyricsResult struct {
-	Lyrics   LyricList
-	Evidence []LyricsEvidence
+	Lyrics    LyricList
+	Evidence  []LyricsEvidence
+	Discovery LyricsDiscovery
+}
+
+// LyricsDiscovery identifies the committed enhanced snapshot. Revision is
+// opaque and empty when no discovery-capable plugin published one.
+type LyricsDiscovery struct {
+	Revision string
+	Complete bool
+}
+
+// LyricsPublication is live host publication metadata passed to one plugin
+// invocation. It is never exposed to clients.
+type LyricsPublication struct {
+	Generation string
+	Token      string
+	CallID     string
+	Kind       string
 }
 
 // MarshalJSON keeps the lyrics column invariant: empty/nil serializes to [], never null.

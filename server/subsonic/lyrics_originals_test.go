@@ -39,6 +39,10 @@ func (f *fakeOriginalsLyrics) GetLyricsVariantsResult(context.Context, *model.Me
 	return model.LyricsResult{}, nil
 }
 
+func (f *fakeOriginalsLyrics) RefreshLyricsVariantsResult(ctx context.Context, mf *model.MediaFile, allSources bool) (model.LyricsResult, error) {
+	return f.GetLyricsVariantsResult(ctx, mf, allSources)
+}
+
 func (f *fakeOriginalsLyrics) GetLyricsByArtistTitle(context.Context, string, string) (model.LyricList, error) {
 	return nil, nil
 }
