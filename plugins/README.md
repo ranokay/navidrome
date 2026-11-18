@@ -645,7 +645,8 @@ generation, admission and state records.
   `scope`, `revision`, completion and `expiresAt` (absolute Unix seconds, the
   completion record's expiry, not the expiry of the published rows).
   Rows from a different live generation are not returned. `@navidrome/publication/active` exposes the current
-  generation. Admissions are generation-bound: a reload retires every
+  generation and, when true, the `controlMerge` capability that confirms
+  support for the control operations below. Admissions are generation-bound: a reload retires every
   admission minted by the old generation, so stale tokens cannot commit and
   active tails cannot block the reloaded host. State is process-scoped: a
   reload mints a new generation, and old rows are ignored rather than reused.
@@ -656,8 +657,8 @@ generation, admission and state records.
   storage quota. Cooldown and failure observations use this path; the target
   must not be reserved, `lyrics:v5:` or `sweep-done:`, and a permanent target
   stays permanent. Only targets written exclusively through this path are
-  monotonic. Read the target key for the merged value; a missing, expired or
-  non-integer target starts from zero. The same namespace accepts
+  monotonic. Read the target key for the merged value; for a scalar merge a
+  missing, expired or non-integer target starts from zero. The same namespace accepts
   `{operation:"failure", failures, until, updatedAt, ttl}` and
   `{operation:"reset", resetAt, ttl}` for the source-failure row: failures
   older than the row's recovery timestamp are ignored, and a recovery clears
