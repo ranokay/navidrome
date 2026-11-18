@@ -657,7 +657,12 @@ generation, admission and state records.
   must not be reserved, `lyrics:v5:` or `sweep-done:`, and a permanent target
   stays permanent. Only targets written exclusively through this path are
   monotonic. Read the target key for the merged value; a missing, expired or
-  non-integer target starts from zero.
+  non-integer target starts from zero. The same namespace accepts
+  `{operation:"failure", failures, until, updatedAt, ttl}` and
+  `{operation:"reset", resetAt, ttl}` for the source-failure row: failures
+  older than the row's recovery timestamp are ignored, and a recovery clears
+  only failures that predate it. The plugin reads the complete row and the
+  legacy reset key.
 - A terminal commit consumes its admission: `resume` and `commit` require the
   admission state to be `active`. An `awaitTail` commit keeps it active for the
   tail. After a terminal commit the token cannot be replayed; use

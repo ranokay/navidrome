@@ -66,8 +66,13 @@ type publicationWrite struct {
 }
 
 type publicationControlMerge struct {
-	Value int64 `json:"value"`
-	TTL   int64 `json:"ttl"`
+	Value     int64  `json:"value,omitempty"`
+	TTL       int64  `json:"ttl"`
+	Operation string `json:"operation,omitempty"`
+	Failures  int64  `json:"failures,omitempty"`
+	Until     int64  `json:"until,omitempty"`
+	UpdatedAt int64  `json:"updatedAt,omitempty"`
+	ResetAt   int64  `json:"resetAt,omitempty"`
 }
 
 type publicationCommitRequest struct {
@@ -94,8 +99,9 @@ type publicationStateResponse struct {
 }
 
 type publicationActiveResponse struct {
-	Handled    bool   `json:"handled"`
-	Generation string `json:"generation"`
+	Handled      bool   `json:"handled"`
+	Generation   string `json:"generation"`
+	ControlMerge bool   `json:"controlMerge,omitempty"`
 }
 
 // AdmitHost mints a host-owned admission for an API-triggered refresh before
@@ -219,7 +225,7 @@ func (s *kvstoreServiceImpl) handlePublicationSet(ctx context.Context, key strin
 			strings.HasPrefix(target, "lyrics:v5:") || strings.HasPrefix(target, "sweep-done:") {
 			return fmt.Errorf("%w: invalid control target", errPublicationRejected)
 		}
-		return s.mergeControl(ctx, target, value)
+		return s.controlPublication(ctx, target, value)
 	default:
 		return fmt.Errorf("%w: reserved publication key", errPublicationRejected)
 	}
@@ -232,7 +238,7 @@ func (s *kvstoreServiceImpl) handlePublicationGet(ctx context.Context, key strin
 		if err != nil || generation == "" {
 			return nil, false, err
 		}
-		value, err := json.Marshal(publicationActiveResponse{Handled: true, Generation: generation})
+		value, err := json.Marshal(publicationActiveResponse{Handled: true, Generation: generation, ControlMerge: true})
 		return value, err == nil, err
 	case strings.HasPrefix(key, publicationAdmissionPrefix):
 		track := strings.TrimPrefix(key, publicationAdmissionPrefix)
@@ -494,6 +500,111 @@ func (s *kvstoreServiceImpl) applyCommitTx(ctx context.Context, tx *sql.Tx, trac
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE plugin_publication_admissions SET state=?, expires_at=? WHERE track_key=?`, admissionState, time.Now().Add(publicationTTL).UTC().Format("2006-01-02 15:04:05"), track)
 	return err
+}
+
+func (s *kvstoreServiceImpl) controlPublication(ctx context.Context, target string, payload []byte) error {
+	var request publicationControlMerge
+	if err := json.Unmarshal(payload, &request); err != nil || request.TTL <= 0 ||
+		request.TTL > int64(publicationStateTTL/time.Second) {
+		return fmt.Errorf("%w: invalid control request", errPublicationRejected)
+	}
+	if request.Operation == "failure" || request.Operation == "reset" {
+		return s.reduceSourceFailure(ctx, target, request)
+	}
+	if request.Value <= 0 {
+		return fmt.Errorf("%w: invalid control merge", errPublicationRejected)
+	}
+	return s.mergeControl(ctx, target, payload)
+}
+
+type sourceFailureControl struct {
+	Failures  int64 `json:"failures"`
+	Until     int64 `json:"until"`
+	UpdatedAt int64 `json:"updatedAt"`
+	ResetAt   int64 `json:"resetAt"`
+}
+
+// reduceSourceFailure records one failure or recovery as a single conditional
+// row transaction. A recovery only clears a failure that predates its start;
+// a newer failure survives even if the recovery request arrives later.
+func (s *kvstoreServiceImpl) reduceSourceFailure(ctx context.Context, target string, request publicationControlMerge) error {
+	if !strings.HasPrefix(target, "source-failure:v1:") {
+		return fmt.Errorf("%w: invalid failure target", errPublicationRejected)
+	}
+	s.publicationMu.Lock()
+	defer s.publicationMu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var raw []byte
+	var oldSize int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT value, COALESCE(size,0) FROM kvstore
+		WHERE key = ? AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+	`, target).Scan(&raw, &oldSize)
+	if errors.Is(err, sql.ErrNoRows) {
+		raw, oldSize = nil, 0
+	} else if err != nil {
+		return err
+	}
+	state := sourceFailureControl{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &state)
+	}
+	switch request.Operation {
+	case "failure":
+		if request.UpdatedAt < state.ResetAt {
+			return nil
+		}
+		state.Failures = max(state.Failures, request.Failures)
+		state.Until = max(state.Until, request.Until)
+		state.UpdatedAt = max(state.UpdatedAt, request.UpdatedAt)
+	case "reset":
+		if request.ResetAt > state.ResetAt {
+			state.ResetAt = request.ResetAt
+			if state.UpdatedAt < request.ResetAt {
+				state.Failures, state.Until, state.UpdatedAt = 0, 0, 0
+			}
+		}
+	}
+	value, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	delta := int64(len(value)) - oldSize
+	if delta > 0 {
+		used, err := storageUsedTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if used+delta > s.maxSize {
+			return fmt.Errorf("%w: storage limit", errPublicationRejected)
+		}
+	}
+	expiry := time.Now().Unix() + request.TTL
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO kvstore (key, value, size, created_at, updated_at, expires_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, datetime(?, 'unixepoch'))
+		ON CONFLICT(key) DO UPDATE SET
+			value=excluded.value, size=excluded.size, updated_at=CURRENT_TIMESTAMP, expires_at=excluded.expires_at
+	`, target, value, len(value), expiry); err != nil {
+		return err
+	}
+	if request.Operation == "reset" {
+		sourceID := strings.TrimPrefix(target, "source-failure:v1:")
+		resetKey := "source-failure-reset:v1:" + sourceID
+		resetValue := strconv.FormatInt(state.ResetAt, 10)
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO kvstore (key, value, size, created_at, updated_at, expires_at)
+			VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, datetime(?, 'unixepoch'))
+			ON CONFLICT(key) DO UPDATE SET value=excluded.value, size=excluded.size, updated_at=CURRENT_TIMESTAMP, expires_at=excluded.expires_at
+		`, resetKey, resetValue, len(resetValue), expiry); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // mergeControl atomically raises a scalar KV record to the requested value.

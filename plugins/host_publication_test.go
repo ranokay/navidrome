@@ -559,3 +559,73 @@ func TestPublicationControlMergeIsMonotonic(t *testing.T) {
 		`SELECT CAST(strftime('%s', expires_at) AS INTEGER) FROM kvstore WHERE key=?`, permanent).Scan(&permanentExpiry))
 	require.False(t, permanentExpiry.Valid, "a permanent target acquired an expiry")
 }
+
+func readFailureControl(t *testing.T, service *kvstoreServiceImpl, target string) sourceFailureControl {
+	t.Helper()
+	raw, exists, err := service.Get(t.Context(), target)
+	require.NoError(t, err)
+	require.True(t, exists)
+	var state sourceFailureControl
+	require.NoError(t, json.Unmarshal(raw, &state))
+	return state
+}
+
+func writeFailureControl(t *testing.T, service *kvstoreServiceImpl, target string, request publicationControlMerge) {
+	t.Helper()
+	raw, err := json.Marshal(request)
+	require.NoError(t, err)
+	require.NoError(t, service.SetWithTTL(t.Context(), publicationControlPrefix+target, raw, request.TTL+60))
+}
+
+func TestFailureReducerConditionsResetOnNewerFailure(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	target := "source-failure:v1:track-1"
+	writeFailureControl(t, service, target, publicationControlMerge{
+		Operation: "failure", Failures: 1, Until: 20_000, UpdatedAt: 15_000, TTL: 600,
+	})
+	// Recovery R started at 10s; failure F started at 15s and is already
+	// committed. R must not hide F by advancing the epoch.
+	writeFailureControl(t, service, target, publicationControlMerge{
+		Operation: "reset", ResetAt: 10_000, TTL: 600,
+	})
+	state := readFailureControl(t, service, target)
+	require.EqualValues(t, 1, state.Failures)
+	require.EqualValues(t, 20_000, state.Until)
+	require.EqualValues(t, 15_000, state.UpdatedAt)
+	require.EqualValues(t, 10_000, state.ResetAt)
+
+	// A pre-recovery failure arriving late is ignored.
+	writeFailureControl(t, service, target, publicationControlMerge{
+		Operation: "failure", Failures: 2, Until: 40_000, UpdatedAt: 5_000, TTL: 600,
+	})
+	state = readFailureControl(t, service, target)
+	require.EqualValues(t, 1, state.Failures)
+	require.EqualValues(t, 20_000, state.Until)
+
+	// A genuine recovery clears the older failure.
+	writeFailureControl(t, service, target, publicationControlMerge{
+		Operation: "reset", ResetAt: 16_000, TTL: 600,
+	})
+	state = readFailureControl(t, service, target)
+	require.Zero(t, state.Failures)
+	require.Zero(t, state.Until)
+	require.EqualValues(t, 16_000, state.ResetAt)
+
+	// A failure after the recovery starts a fresh bucket.
+	writeFailureControl(t, service, target, publicationControlMerge{
+		Operation: "failure", Failures: 1, Until: 21_000, UpdatedAt: 17_000, TTL: 600,
+	})
+	state = readFailureControl(t, service, target)
+	require.EqualValues(t, 1, state.Failures)
+	require.EqualValues(t, 21_000, state.Until)
+}
+
+func TestPublicationActiveExposesControlMerge(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	raw, exists, err := service.Get(t.Context(), publicationActiveKey)
+	require.NoError(t, err)
+	require.True(t, exists)
+	var active publicationActiveResponse
+	require.NoError(t, json.Unmarshal(raw, &active))
+	require.True(t, active.ControlMerge)
+}
