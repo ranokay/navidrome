@@ -244,8 +244,9 @@ func (api *Router) routes() http.Handler {
 	return r
 }
 
-// Add a POST-only Subsonic handler. Personalized mutations are deliberately
-// not exposed as GETs so caches, prefetchers and links cannot trigger them.
+// postOnly adds a POST-only Subsonic handler. Personalized mutations are
+// deliberately not exposed as GETs so caches, prefetchers and links cannot
+// trigger them.
 func postOnly(r chi.Router, path string, f handlerRaw) {
 	r.Post("/"+path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "private, no-store")

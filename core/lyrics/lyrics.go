@@ -188,7 +188,7 @@ func (l *lyricsService) GetLyricsVariantsResult(ctx context.Context, mf *model.M
 	return model.LyricsResult{}, pluginErr
 }
 
-// Results retain source priority independently of completion order.
+// sourceResult retains source priority independently of completion order.
 type sourceResult struct {
 	index    int
 	lyrics   model.LyricList

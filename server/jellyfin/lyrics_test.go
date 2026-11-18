@@ -67,8 +67,6 @@ func (f *fakeLyricsService) GetLyricsOriginal(context.Context, *model.MediaFile,
 	return model.LyricsOriginal{}, model.ErrLyricsOriginalUnavailable
 }
 
-func p(ms int64) *int64 { return &ms }
-
 var _ = Describe("getLyrics", func() {
 	var ctx context.Context
 	var api *Router

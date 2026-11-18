@@ -726,10 +726,11 @@ var _ = Describe("Artwork hydration", func() {
 		It("stops fetching when the consumer breaks", func() {
 			ids := make([]string, artworkChunkSize+1)
 			calls := 0
-			for range streamByIDs(ids, func(chunk []string) ([]string, error) {
+			for _, err := range streamByIDs(ids, func(chunk []string) ([]string, error) {
 				calls++
 				return chunk, nil
 			}) {
+				Expect(err).ToNot(HaveOccurred())
 				break
 			}
 

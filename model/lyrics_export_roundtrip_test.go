@@ -1,7 +1,6 @@
 package model_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/navidrome/navidrome/model"
@@ -11,7 +10,7 @@ import (
 // fixture. Re-import must preserve its lanes and terminal word timings.
 func TestExportedELRCRetainsBackgroundVoiceOnImport(t *testing.T) {
 	const exported = "[00:52.00]<00:52.00>Main <00:52.50>line<00:53.00>\n[bg:<00:53.00>Okay<00:53.50>]\n[00:55.00]Next"
-	lyrics, err := model.ParseLyrics(context.Background(), ".elrc", "eng", []byte(exported))
+	lyrics, err := model.ParseLyrics(t.Context(), ".elrc", "eng", []byte(exported))
 	if err != nil || len(lyrics) != 1 || len(lyrics[0].Line) != 2 {
 		t.Fatalf("export could not be re-imported: lyrics=%v error=%v", lyrics, err)
 	}
@@ -32,7 +31,7 @@ func TestExportedELRCRetainsBackgroundVoiceOnImport(t *testing.T) {
 // Matches the UI export fixture with line-timed voices and no word cues.
 func TestExportedTTMLRetainsSeparateVoiceTimingOnImport(t *testing.T) {
 	const exported = `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><head><metadata><ttm:agent xml:id="v1" type="person"/><ttm:agent xml:id="v2" type="person"/></metadata></head><body><div><p begin="00:00:01.000" end="00:00:08.000"><span begin="00:00:01.000" end="00:00:03.000" ttm:agent="v1">Lead</span> <span begin="00:00:06.000" end="00:00:08.000" ttm:agent="v2" ttm:role="x-bg">Echo</span></p></div></body></tt>`
-	lyrics, err := model.ParseLyrics(context.Background(), ".ttml", "eng", []byte(exported))
+	lyrics, err := model.ParseLyrics(t.Context(), ".ttml", "eng", []byte(exported))
 	if err != nil || len(lyrics) != 1 || len(lyrics[0].Line) != 1 {
 		t.Fatalf("export could not be re-imported: lyrics=%v error=%v", lyrics, err)
 	}

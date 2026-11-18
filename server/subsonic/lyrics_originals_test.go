@@ -3,7 +3,9 @@ package subsonic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 
@@ -81,7 +83,7 @@ var _ = Describe("Lyrics originals routes", func() {
 			Provider: "Native Provider", Format: "elrc", PlaybackIndex: 0,
 			Original: model.LyricsOriginalInfo{Available: true, Format: "qrc", Provenance: "supplied", MediaType: "application/xml", Extension: ".qrc", Size: 42},
 		}}
-		request := httptest.NewRequest("GET", "/getLyricsVariants?id=track-1&f=json", nil)
+		request := httptest.NewRequest(http.MethodGet, "/getLyricsVariants?id=track-1&f=json", nil)
 		response, err := router.GetLyricsVariants(request)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(response.LyricsVariants).ToNot(BeNil())
@@ -100,7 +102,7 @@ var _ = Describe("Lyrics originals routes", func() {
 			Identity: identity, Format: "qrc", Provenance: "supplied",
 			MediaType: "application/xml", Extension: ".qrc", Document: []byte(document),
 		}
-		request := httptest.NewRequest("GET", "/getLyricsOriginal?id=track-1&selection="+selection, nil)
+		request := httptest.NewRequest(http.MethodGet, "/getLyricsOriginal?id=track-1&selection="+selection, nil)
 		recorder := httptest.NewRecorder()
 
 		response, err := router.GetLyricsOriginal(recorder, request)
@@ -116,7 +118,7 @@ var _ = Describe("Lyrics originals routes", func() {
 	})
 
 	It("rejects invalid selections before asking for bytes", func() {
-		request := httptest.NewRequest("GET", "/getLyricsOriginal?id=track-1&selection=not-a-token", nil)
+		request := httptest.NewRequest(http.MethodGet, "/getLyricsOriginal?id=track-1&selection=not-a-token", nil)
 		recorder := httptest.NewRecorder()
 		_, err := router.GetLyricsOriginal(recorder, request)
 		Expect(err).To(HaveOccurred())
@@ -125,7 +127,7 @@ var _ = Describe("Lyrics originals routes", func() {
 
 	It("reports unavailable originals as data-not-found", func() {
 		service.originalErr = fmt.Errorf("%w: selection no longer offered", model.ErrLyricsOriginalUnavailable)
-		request := httptest.NewRequest("GET", "/getLyricsOriginal?id=track-1&selection="+selection, nil)
+		request := httptest.NewRequest(http.MethodGet, "/getLyricsOriginal?id=track-1&selection="+selection, nil)
 		recorder := httptest.NewRecorder()
 		_, err := router.GetLyricsOriginal(recorder, request)
 		Expect(err).To(HaveOccurred())
@@ -135,8 +137,8 @@ var _ = Describe("Lyrics originals routes", func() {
 	})
 
 	It("sanitizes unexpected original retrieval diagnostics in the client response", func() {
-		service.originalErr = fmt.Errorf("https://user:PRIVATE_PASSWORD@provider.test/lyrics: PRIVATE_API_KEY /private/music/PRIVATE_PATH PRIVATE_BODY")
-		request := httptest.NewRequest("GET", "/getLyricsOriginal?id=track-1&f=json&selection="+selection, nil)
+		service.originalErr = errors.New("https://user:PRIVATE_PASSWORD@provider.test/lyrics: PRIVATE_API_KEY /private/music/PRIVATE_PATH PRIVATE_BODY")
+		request := httptest.NewRequest(http.MethodGet, "/getLyricsOriginal?id=track-1&f=json&selection="+selection, nil)
 		recorder := httptest.NewRecorder()
 		_, err := router.GetLyricsOriginal(recorder, request)
 		Expect(err).To(HaveOccurred())
@@ -160,7 +162,7 @@ var _ = Describe("Lyrics originals routes", func() {
 			"/getLyricsOriginal?id=track-1&f=json&selection=" + selection,
 		} {
 			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest("GET", path, nil))
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 			Expect(recorder.Body.String()).To(ContainSubstring(`"status":"failed"`))
 			Expect(recorder.Body.String()).ToNot(ContainSubstring("<QrcInfos"))
 			Expect(recorder.Body.String()).ToNot(ContainSubstring("\"document\""))

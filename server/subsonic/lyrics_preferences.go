@@ -422,8 +422,7 @@ func applyRestore(record *model.LyricsPreferenceRecord, token string) error {
 }
 
 func lyricsPreferenceError(err error) error {
-	var subErr subError
-	if errors.As(err, &subErr) {
+	if _, ok := errors.AsType[subError](err); ok {
 		return err
 	}
 	switch {

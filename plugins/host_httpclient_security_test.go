@@ -35,7 +35,7 @@ func TestHTTPDiagnosticsKeepCredentialsOnWireOnly(t *testing.T) {
 	defer server.Close()
 	svc := newHTTPService("test-plugin", &HTTPPermission{RequiredHosts: []string{"127.0.0.1"}})
 	defer svc.Close()
-	response, err := svc.Send(context.Background(), host.HTTPRequest{
+	response, err := svc.Send(t.Context(), host.HTTPRequest{
 		Method: "GET", URL: server.URL + "/lyrics?usertoken=" + url.QueryEscape(secret) + "&%55serToken=other-secret", TimeoutMs: 1000,
 	})
 	if err != nil || response == nil || string(response.Body) != "ok" {
@@ -65,7 +65,7 @@ func TestHTTPDiagnosticsRedactFailuresAndPreserveCancellation(t *testing.T) {
 			defer server.Close()
 			svc := newHTTPService("test-plugin", &HTTPPermission{RequiredHosts: []string{"127.0.0.1"}})
 			defer svc.Close()
-			_, err := svc.Send(context.Background(), host.HTTPRequest{Method: "GET", URL: server.URL + "?usertoken=" + secret})
+			_, err := svc.Send(t.Context(), host.HTTPRequest{Method: "GET", URL: server.URL + "?usertoken=" + secret})
 			if err == nil || strings.Contains(err.Error(), secret) {
 				t.Fatalf("expected a safe redirect failure, got %v", err)
 			}
@@ -73,7 +73,7 @@ func TestHTTPDiagnosticsRedactFailuresAndPreserveCancellation(t *testing.T) {
 	}
 	svc := newHTTPService("test-plugin", &HTTPPermission{RequiredHosts: []string{"127.0.0.1"}})
 	defer svc.Close()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := svc.Send(ctx, host.HTTPRequest{Method: "GET", URL: "http://127.0.0.1:1/?usertoken=" + secret})
 	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), secret) {

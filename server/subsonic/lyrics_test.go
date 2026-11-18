@@ -1113,7 +1113,7 @@ var _ = Describe("lyrics recording evidence responses", func() {
 		match := &model.LyricsMatch{Status: model.LyricsMatchAmbiguous, Reasons: []string{"version-unconfirmed"}}
 		list := buildLyricsList(mf, model.LyricList{{
 			Kind: model.LyricKindMain, Lang: "en", Synced: true,
-			Line:  []model.Line{{Value: "line one", Start: int64Ptr(0)}},
+			Line:  []model.Line{{Value: "line one", Start: new(int64(0))}},
 			Match: match,
 		}}, []model.LyricsEvidence{{
 			PluginID: "nd-better-lyrics", Kind: "instrumental", Provider: "LRCLib",
@@ -1133,7 +1133,7 @@ var _ = Describe("lyrics recording evidence responses", func() {
 		mf := &model.MediaFile{ID: "track-1", Title: "Song", Artist: "Artist"}
 		list := buildLyricsList(mf, model.LyricList{{
 			Kind: model.LyricKindMain, Lang: "en", Synced: true,
-			Line:  []model.Line{{Value: "line one", Start: int64Ptr(0)}},
+			Line:  []model.Line{{Value: "line one", Start: new(int64(0))}},
 			Match: &model.LyricsMatch{Status: model.LyricsMatchValidated},
 		}}, []model.LyricsEvidence{{Kind: "instrumental", Provider: "LRCLib"}}, false, nil)
 		Expect(list.StructuredLyrics).To(HaveLen(1))
@@ -1141,5 +1141,3 @@ var _ = Describe("lyrics recording evidence responses", func() {
 		Expect(list.InstrumentalEvidence).To(BeEmpty())
 	})
 })
-
-func int64Ptr(value int64) *int64 { return &value }

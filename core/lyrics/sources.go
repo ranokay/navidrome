@@ -167,9 +167,9 @@ func loadDetailedResult(ctx context.Context, provider Provider, mf *model.MediaF
 	return model.LyricsResult{Lyrics: list}, err
 }
 
-// The cache shares loader errors without retaining them, but wraps them with a
-// transport prefix. Restore the provider's original error so callers and the
-// Subsonic retry parser see the same identity and message as an uncached call.
+// unwrapLyricsCacheError restores the provider's original error after the
+// cache has wrapped it with a transport prefix. Callers and the Subsonic retry
+// parser keep the same identity and message as an uncached call.
 func unwrapLyricsCacheError(err error) error {
 	const prefix = "cache error: loader returned "
 	if err == nil || !strings.HasPrefix(err.Error(), prefix) {

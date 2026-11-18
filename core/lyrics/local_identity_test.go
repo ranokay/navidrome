@@ -1,7 +1,6 @@
 package lyrics
 
 import (
-	"context"
 	"encoding/json"
 	"path/filepath"
 	"testing"
@@ -24,7 +23,7 @@ func embeddedMediaFile(t *testing.T, id string) *model.MediaFile {
 }
 
 func TestEmbeddedVariantGetsStableHostIdentity(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	mf := embeddedMediaFile(t, "track-embedded")
 	first, err := fromEmbedded(ctx, mf)
 	if err != nil {
@@ -59,7 +58,7 @@ func TestLocalVariantsDistinguishFormats(t *testing.T) {
 	})
 
 	mf := embeddedMediaFile(t, "track-sidecar")
-	embedded := LocalVariants(context.Background(), mf)
+	embedded := LocalVariants(t.Context(), mf)
 	if len(embedded) != 1 || embedded[0].Kind != model.LyricsLocalKindEmbedded {
 		t.Fatalf("embedded variant was not listed: %+v", embedded)
 	}

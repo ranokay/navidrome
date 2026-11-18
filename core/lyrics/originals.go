@@ -3,6 +3,7 @@ package lyrics
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -106,14 +107,7 @@ func (l *lyricsService) GetLyricsOriginal(ctx context.Context, mf *model.MediaFi
 	if l.pluginLoader == nil {
 		return model.LyricsOriginal{}, fmt.Errorf("%w: no plugin loader", model.ErrLyricsOriginalUnavailable)
 	}
-	allowed := false
-	for _, pattern := range l.pluginPatterns() {
-		if pattern == plugin {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	if !slices.Contains(l.pluginPatterns(), plugin) {
 		return model.LyricsOriginal{}, fmt.Errorf("%w: plugin is not a configured lyrics source", model.ErrLyricsOriginalUnavailable)
 	}
 	provider, ok := l.pluginLoader.LoadLyricsProvider(plugin)

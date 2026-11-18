@@ -55,7 +55,8 @@ func (l *staticLoader) LoadLyricsProvider(name string) (lyrics.Provider, bool) {
 }
 
 var _ = Describe("Lyrics variants and originals", func() {
-	ctx := context.Background()
+	var ctx context.Context
+	BeforeEach(func() { ctx = GinkgoT().Context() })
 	mf := &model.MediaFile{ID: "track-1", Title: "Song", Artist: "Artist"}
 
 	var identity model.LyricsVariantIdentity
@@ -114,7 +115,7 @@ var _ = Describe("Lyrics variants and originals", func() {
 	It("bounds the global listing deterministically", func() {
 		conf.Update(func(c *conf.Options) { c.LyricsPriority = "orig-plugin" })
 		provider := &optionalLyricsProvider{}
-		for index := 0; index < model.MaxLyricsVariants+5; index++ {
+		for index := range model.MaxLyricsVariants + 5 {
 			candidate := identity
 			candidate.Recording = fmt.Sprintf("rec-%d", index)
 			selection, ok := model.EncodeLyricsSelection("orig-plugin", candidate)

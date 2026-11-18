@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -390,7 +389,7 @@ var _ = Describe("Lyrics", func() {
 			}
 			svc := lyrics.NewLyrics(nil, mockLoader)
 			list, err := svc.GetLyrics(ctx, &mf)
-			Expect(err).To(BeNil())
+			Expect(err).ToNot(HaveOccurred())
 			Expect(list).To(HaveLen(2))
 			Expect(*list[0].Source).To(Equal(model.LyricsSource{
 				Type: model.LyricsSourcePlugin, Name: "test-lyrics-plugin",
@@ -444,7 +443,7 @@ var _ = Describe("Lyrics", func() {
 		It("should return a plugin error when no later source has lyrics", func() {
 			conf.Update(func(c *conf.Options) { c.LyricsPriority = "test-lyrics-plugin,embedded" })
 			mf.Lyrics = ""
-			mockLoader.err = fmt.Errorf("remote lyrics cooldown active for 30s")
+			mockLoader.err = errors.New("remote lyrics cooldown active for 30s")
 			svc := lyrics.NewLyrics(nil, mockLoader)
 
 			list, err := svc.GetLyrics(ctx, &mf)
@@ -634,7 +633,7 @@ var _ = Describe("Lyrics", func() {
 		})
 
 		It("does not retain or rewrite a detailed provider cooldown error", func() {
-			mockLoader.err = fmt.Errorf("remote lyrics cooldown active for 30s")
+			mockLoader.err = errors.New("remote lyrics cooldown active for 30s")
 			for range 2 {
 				_, err := svc.GetLyricsVariantsResult(ctx, &mf, false)
 				Expect(err).To(MatchError("remote lyrics cooldown active for 30s"))
@@ -837,14 +836,12 @@ func TestLyricsVariants(t *testing.T) {
 		start := make(chan struct{})
 		var wg sync.WaitGroup
 		for range 2 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				<-start
 				list, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(list).To(HaveLen(1))
-			}()
+			})
 		}
 		close(start)
 		wg.Wait()
@@ -875,7 +872,7 @@ func TestLyricsVariants(t *testing.T) {
 			loader := variantPluginLoader{
 				"First": variantProvider(provider), "Second": variantProvider(provider),
 				"Failing": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
-					return nil, fmt.Errorf("provider unavailable")
+					return nil, errors.New("provider unavailable")
 				}),
 			}
 			list, err := lyrics.NewLyrics(nil, loader).GetLyricsVariants(t.Context(), mf, true)

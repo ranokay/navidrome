@@ -37,7 +37,7 @@ var _ = Describe("Lyrics personal preferences", func() {
 	embeddedFile := func(id string) *model.MediaFile {
 		list := model.LyricList{{
 			Kind: model.LyricKindMain, Lang: "en", Synced: true,
-			Line: []model.Line{{Value: "embedded line", Start: int64Ptr(1000)}},
+			Line: []model.Line{{Value: "embedded line", Start: new(int64(1000))}},
 		}}
 		raw, err := json.Marshal(list)
 		Expect(err).NotTo(HaveOccurred())

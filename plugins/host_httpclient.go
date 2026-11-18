@@ -158,8 +158,8 @@ func (s *httpServiceImpl) Send(ctx context.Context, request host.HTTPRequest) (r
 	}, nil
 }
 
-// Query strings and userinfo may contain credentials even on successful calls.
-// Diagnostic formatting must not alter the request that is sent to the provider.
+// httpDiagnosticURL formats a request URL without altering the request sent to
+// the provider. Query strings and userinfo may contain credentials.
 func httpDiagnosticURL(raw string) string {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
