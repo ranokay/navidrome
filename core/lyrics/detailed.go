@@ -26,7 +26,7 @@ func newDetailedCoordinator() *detailedCoordinator {
 	return &detailedCoordinator{flights: make(map[string]*detailedFlight)}
 }
 
-func (c *detailedCoordinator) do(ctx context.Context, key string, refresh bool, loader func(context.Context) (model.LyricsResult, error)) (model.LyricsResult, error) {
+func (c *detailedCoordinator) do(ctx context.Context, key string, refresh bool, prepare func() error, loader func(context.Context) (model.LyricsResult, error)) (model.LyricsResult, error) {
 	for {
 		c.mu.Lock()
 		flight := c.flights[key]
@@ -36,11 +36,11 @@ func (c *detailedCoordinator) do(ctx context.Context, key string, refresh bool, 
 			case <-ctx.Done():
 				return model.LyricsResult{}, ctx.Err()
 			case <-flight.done:
-				if flight.err != nil {
-					return model.LyricsResult{}, flight.err
-				}
 				if refresh && !flight.refresh {
 					continue // sequential refresh after the normal load
+				}
+				if flight.err != nil {
+					return model.LyricsResult{}, flight.err
 				}
 				return flight.result, nil
 			}
@@ -48,6 +48,15 @@ func (c *detailedCoordinator) do(ctx context.Context, key string, refresh bool, 
 		flight = &detailedFlight{refresh: refresh, done: make(chan struct{})}
 		c.flights[key] = flight
 		c.mu.Unlock()
+		if refresh && prepare != nil {
+			if err := prepare(); err != nil {
+				c.mu.Lock()
+				delete(c.flights, key)
+				c.mu.Unlock()
+				close(flight.done)
+				return model.LyricsResult{}, err
+			}
+		}
 
 		go func() {
 			loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), detailedLoadBudget)

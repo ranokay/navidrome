@@ -86,6 +86,14 @@ func (l *LyricsPlugin) StartPublication(ctx context.Context, mf *model.MediaFile
 	return model.LyricsPublication{Generation: l.plugin.generation, Token: token, CallID: callID, Kind: kind}, true, nil
 }
 
+// AbortPublication releases an abandoned refresh admission.
+func (l *LyricsPlugin) AbortPublication(ctx context.Context, mf *model.MediaFile, publication model.LyricsPublication) error {
+	if l.plugin == nil || l.plugin.publication == nil || publication.Generation == "" || publication.Token == "" {
+		return nil
+	}
+	return l.plugin.publication.ReleaseHost(ctx, publication.Generation, publicationTrackKey(mf), publication.Token)
+}
+
 // GetLyricsWithPublication negotiates the optional classic-capable export. It
 // returns supported=false only when the plugin genuinely lacks the export, so a
 // capable host never mistakes a denial for legacy support.
@@ -170,17 +178,7 @@ func (l *LyricsPlugin) GetOriginalWithPublication(ctx context.Context, mf *model
 	)
 	if err != nil {
 		if unsupportedPluginFunction(err) {
-			fallback, fallbackErr := callPluginFunction[capabilities.GetLyricsOriginalRequest, capabilities.GetLyricsOriginalResponse](
-				ctx, l.plugin, FuncLyricsGetOriginal,
-				capabilities.GetLyricsOriginalRequest{
-					Track: mediaFileToTrackInfo(l.plugin, mf), Identity: capabilityLyricsVariant(identity),
-				},
-			)
-			if fallbackErr != nil {
-				return model.LyricsOriginal{}, false, fallbackErr
-			}
-			original, parseErr := parseOriginalResponse(fallback, identity)
-			return original, false, parseErr
+			return model.LyricsOriginal{}, false, nil
 		}
 		return model.LyricsOriginal{}, true, err
 	}

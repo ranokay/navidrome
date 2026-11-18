@@ -31,6 +31,7 @@ const (
 	maxPublicationWrites       = 64
 	maxPublicationBytes        = 16 << 20
 	maxPublicationEntrySize    = 1 << 20
+	publicationReservedBytes   = 1 << 20
 )
 
 var errPublicationRejected = errors.New("publication rejected")
@@ -103,6 +104,18 @@ func (s *kvstoreServiceImpl) AdmitHost(ctx context.Context, generation, track, k
 		return "", err
 	}
 	return row.Token, nil
+}
+
+// ReleaseHost releases an abandoned API-triggered refresh admission.
+func (s *kvstoreServiceImpl) ReleaseHost(ctx context.Context, generation, track, token string) error {
+	request, err := json.Marshal(publicationAdmissionRequest{
+		Version: publicationVersion, Action: "release", Generation: generation,
+		Track: track, Token: token,
+	})
+	if err != nil {
+		return err
+	}
+	return s.admitPublication(ctx, track, request)
 }
 
 func randomPublicationToken(bytes int) string {
@@ -212,7 +225,7 @@ func (s *kvstoreServiceImpl) admitPublication(ctx context.Context, track string,
 }
 
 func (s *kvstoreServiceImpl) releaseAdmission(ctx context.Context, track string, request publicationAdmissionRequest, current publicationAdmission, exists bool) error {
-	if exists && current.Generation == request.Generation && current.Token == request.Token && current.RequestID == request.RequestID {
+	if exists && current.Generation == request.Generation && current.Token == request.Token {
 		_, _ = s.db.ExecContext(ctx, `UPDATE plugin_publication_admissions SET state='released', expires_at=datetime('now') WHERE track_key=?`, track)
 	}
 	return nil
@@ -339,10 +352,15 @@ func validateCommitBatch(batch publicationCommitRequest, track string) error {
 		return fmt.Errorf("%w: invalid batch bounds", errPublicationRejected)
 	}
 	total := 0
+	seen := make(map[string]bool, len(batch.Writes))
 	for _, write := range batch.Writes {
 		if err := validateCommitWrite(write, track); err != nil {
 			return err
 		}
+		if seen[write.Key] {
+			return fmt.Errorf("%w: duplicate write key", errPublicationRejected)
+		}
+		seen[write.Key] = true
 		total += len(write.Value)
 	}
 	if total > maxPublicationBytes {
@@ -414,7 +432,7 @@ func (s *kvstoreServiceImpl) checkCommitQuota(ctx context.Context, tx *sql.Tx, w
 		}
 		delta += int64(len(write.Value)) - oldSize
 	}
-	if used+delta > s.maxSize {
+	if used+delta > s.maxSize-publicationReservedBytes {
 		return fmt.Errorf("%w: storage limit", errPublicationRejected)
 	}
 	return nil

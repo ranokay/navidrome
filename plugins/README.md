@@ -615,6 +615,32 @@ usage, err := host.KVStoreGetStorageUsed()
 fmt.Printf("Using %d bytes\n", usage)
 ```
 
+**Publication namespace (host-owned):**
+
+`@navidrome/publication/` is reserved for the host's lyric discovery
+publication contract. Ordinary `kvstore_set`, `setwithttl`, `delete` and
+`deletebyprefix` calls cannot modify it; `kvstore_get` reads the host-owned
+generation, admission and state records.
+
+- `@navidrome/publication/admission:<track>`: set an admission request
+  (`admit`, `resume` or `release`) and read the host-minted token. An old host
+  echoes the request without `handled:true`.
+- `@navidrome/publication/commit:<track>`: submit `{generation, token, track,
+  scope, revision, snapshotDigest, complete, writes}`. The host checks the live
+  generation and exact admission token in the same transaction as every write,
+  the bounded revision and completion record, and rolls the whole batch back
+  on quota, size, TTL or scope failure.
+- `@navidrome/publication/state:<track>`: read the committed revision and
+  completion. `@navidrome/publication/active` exposes the current generation.
+
+The host admits a refresh before the plugin is called so an older sweep can no
+longer publish even before the refresh commits. A task continuation carries
+its original generation and token; it must resume that admission rather than
+re-read the active key. Batches are limited to 64 writes, 16 MiB total, 1 MiB
+per value, allowed `lyrics:v5:`/`sweep-done:` prefixes containing the admitted
+track key, and the existing 32 MB quota. Cooldowns, salts, immutable originals
+and task markers remain separate control writes.
+
 ### Storage
 
 A private read-write directory, mounted into the sandbox at `/storage` and backed by `${DataFolder}/plugins/${pluginID}/storage`. Survives server restarts. Use it for data that doesn't fit a key-value store: caches, downloaded files, generated indexes.

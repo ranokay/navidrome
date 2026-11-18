@@ -173,19 +173,22 @@ func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFil
 		return model.LyricsResult{}, err
 	}
 	var refreshPublication model.LyricsPublication
-	if refresh {
-		if publication, ok := provider.(PublicationProvider); ok && publication.PublicationGeneration() != "" {
-			call, supported, err := publication.StartPublication(ctx, mf, "refresh")
-			if err != nil {
-				return model.LyricsResult{}, err
-			}
-			if supported {
-				refreshPublication = call
-			}
+	prepare := func() error {
+		publication, ok := provider.(PublicationProvider)
+		if !ok || publication.PublicationGeneration() == "" {
+			return nil
 		}
+		call, supported, err := publication.StartPublication(ctx, mf, "refresh")
+		if err != nil {
+			return err
+		}
+		if supported {
+			refreshPublication = call
+		}
+		return nil
 	}
 	key := pluginName + "\x00" + mf.ID + "\x00" + pluginTrackKey(mf)
-	result, err := l.detailed.do(ctx, key, refresh, func(loadCtx context.Context) (model.LyricsResult, error) {
+	result, err := l.detailed.do(ctx, key, refresh, prepare, func(loadCtx context.Context) (model.LyricsResult, error) {
 		if publication, ok := provider.(PublicationProvider); ok && publication.PublicationGeneration() != "" {
 			call := refreshPublication
 			if call.Generation == "" {
@@ -205,6 +208,11 @@ func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFil
 		return loadDetailedResult(loadCtx, provider, mf)
 	})
 	if err != nil {
+		if refresh && refreshPublication.Generation != "" && ctx.Err() == nil {
+			if publication, ok := provider.(PublicationProvider); ok {
+				_ = publication.AbortPublication(context.WithoutCancel(ctx), mf, refreshPublication)
+			}
+		}
 		return model.LyricsResult{}, err
 	}
 	if len(result.Lyrics) > 0 {

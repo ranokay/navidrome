@@ -59,6 +59,10 @@ func (p *refreshProvider) GetLyricsDetailedResultWithRefresh(ctx context.Context
 	return result, true, err
 }
 
+func (p *refreshProvider) AbortPublication(context.Context, *model.MediaFile, model.LyricsPublication) error {
+	return nil
+}
+
 func (p *refreshProvider) GetOriginalWithPublication(context.Context, *model.MediaFile, model.LyricsVariantIdentity, model.LyricsPublication) (model.LyricsOriginal, bool, error) {
 	return model.LyricsOriginal{}, false, nil
 }
@@ -78,7 +82,13 @@ func TestDetailedRefreshWaitsForNormalAndNormalJoinsRefresh(t *testing.T) {
 		_, err := svc.GetLyricsVariantsResult(t.Context(), mf, false)
 		normalDone <- err
 	}()
-	<-p.started
+	select {
+	case err := <-normalDone:
+		t.Fatalf("normal lookup finished before provider call: %v", err)
+	case <-p.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("normal lookup never reached the provider")
+	}
 
 	refreshDone := make(chan error, 1)
 	go func() {

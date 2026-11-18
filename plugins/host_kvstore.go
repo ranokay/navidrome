@@ -266,6 +266,10 @@ func (s *kvstoreServiceImpl) Delete(ctx context.Context, key string) error {
 
 // Has checks if a key exists in storage.
 func (s *kvstoreServiceImpl) Has(ctx context.Context, key string) (bool, error) {
+	if isPublicationKey(key) {
+		_, exists, err := s.Get(ctx, key)
+		return exists, err
+	}
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM kvstore WHERE key = ? AND `+notExpiredFilter, key).Scan(&count)
 	if err != nil {
@@ -350,6 +354,7 @@ func (s *kvstoreServiceImpl) GetMany(ctx context.Context, keys []string) (map[st
 	if len(keys) == 0 {
 		return map[string][]byte{}, nil
 	}
+	keys = slices.DeleteFunc(keys, isPublicationKey)
 
 	const batchSize = 200
 	result := make(map[string][]byte)
@@ -409,6 +414,12 @@ func (s *kvstoreServiceImpl) cleanupExpired(ctx context.Context) {
 	if err != nil {
 		log.Error(ctx, "KVStore cleanup: failed to delete expired keys", "plugin", s.pluginName, err)
 		return
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM plugin_publication_admissions WHERE expires_at < datetime('now')`); err != nil {
+		log.Error(ctx, "KVStore cleanup: failed to delete expired admissions", "plugin", s.pluginName, err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM plugin_publication_state WHERE expires_at < datetime('now')`); err != nil {
+		log.Error(ctx, "KVStore cleanup: failed to delete expired publication state", "plugin", s.pluginName, err)
 	}
 	if count, err := result.RowsAffected(); err == nil && count > 0 {
 		log.Debug("KVStore cleanup completed", "plugin", s.pluginName, "deletedKeys", count)
