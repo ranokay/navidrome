@@ -138,16 +138,27 @@ func (l *lyricsService) fromPluginResult(ctx context.Context, mf *model.MediaFil
 		return model.LyricsResult{}, nil
 	}
 
+	if err := ctx.Err(); err != nil {
+		return model.LyricsResult{}, err
+	}
 	key := pluginName + "\x00" + mf.ID
-	value, err, _ := l.detailedLoads.Do(key, func() (any, error) {
-		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lyricsLoadTimeout)
+	resultChan := l.detailedLoads.DoChan(key, func() (any, error) {
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), detailedLoadBudget)
 		defer cancel()
 		return loadDetailedResult(loadCtx, provider, mf)
 	})
-	if err != nil {
-		return model.LyricsResult{}, err
+	var result model.LyricsResult
+	select {
+	case <-ctx.Done():
+		// A canceled caller must stop waiting promptly. The in-flight load is
+		// shared with other callers and remains bounded by detailedLoadBudget.
+		return model.LyricsResult{}, ctx.Err()
+	case loaded := <-resultChan:
+		if loaded.Err != nil {
+			return model.LyricsResult{}, loaded.Err
+		}
+		result = loaded.Val.(model.LyricsResult)
 	}
-	result := value.(model.LyricsResult)
 	if len(result.Lyrics) > 0 {
 		log.Trace(ctx, "Retrieved lyrics from plugin", "plugin", pluginName, "count", len(result.Lyrics))
 	}

@@ -22,9 +22,10 @@ import (
 const maxLegacyLyricsCandidates = 10
 
 const (
-	lyricsCacheSize   = 1000
-	lyricsCacheTTL    = 5 * time.Minute
-	lyricsLoadTimeout = time.Minute
+	lyricsCacheSize    = 1000
+	lyricsCacheTTL     = 5 * time.Minute
+	lyricsLoadTimeout  = time.Minute
+	detailedLoadBudget = 30 * time.Second
 )
 
 // Provider fetches lyrics for a single media file. It is the contract
@@ -199,7 +200,7 @@ type sourceResult struct {
 func (l *lyricsService) discoverSources(ctx context.Context, mf *model.MediaFile, patterns []string, detailed bool) ([]sourceResult, error) {
 	// Match the plugin host's normal call budget; providers need no special
 	// caching or fast-response protocol to participate in source discovery.
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, detailedLoadBudget)
 	defer cancel()
 	results := make([]sourceResult, len(patterns))
 	completed := make(chan sourceResult, len(patterns))

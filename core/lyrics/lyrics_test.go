@@ -852,6 +852,61 @@ func TestLyricsVariants(t *testing.T) {
 		g.Expect(calls.Load()).To(Equal(int32(2)))
 	})
 
+	t.Run("a canceled detailed caller stops waiting without aborting an active caller", func(t *testing.T) {
+		g := NewWithT(t)
+		conf.Update(func(c *conf.Options) { c.LyricsPriority = "Shared" })
+		started := make(chan struct{})
+		release := make(chan struct{})
+		var calls atomic.Int32
+		loader := variantPluginLoader{"Shared": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+			if calls.Add(1) == 1 {
+				close(started)
+				<-release
+			}
+			return remote, nil
+		})}
+		svc := lyrics.NewLyrics(nil, loader)
+
+		type lookupResult struct {
+			list model.LyricList
+			err  error
+		}
+		canceledCtx, cancel := context.WithCancel(t.Context())
+		canceledResult := make(chan error, 1)
+		go func() {
+			_, err := svc.GetLyricsVariants(canceledCtx, &model.MediaFile{}, false)
+			canceledResult <- err
+		}()
+		<-started
+
+		activeResult := make(chan lookupResult, 1)
+		go func() {
+			list, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
+			activeResult <- lookupResult{list: list, err: err}
+		}()
+		// Let the active caller join the in-flight load before releasing the leader.
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+		select {
+		case err := <-canceledResult:
+			g.Expect(errors.Is(err, context.Canceled)).To(BeTrue(), "canceled caller error: %v", err)
+		case <-time.After(time.Second):
+			close(release)
+			t.Fatal("canceled caller did not stop waiting promptly")
+		}
+		close(release)
+
+		active := <-activeResult
+		g.Expect(active.err).NotTo(HaveOccurred())
+		g.Expect(active.list).To(HaveLen(1))
+		g.Expect(calls.Load()).To(Equal(int32(1)))
+
+		// The load was shared but not retained: a later caller loads again.
+		_, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(calls.Load()).To(Equal(int32(2)))
+	})
+
 	t.Run("concurrent discovery preserves priority and isolates failures", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			g := NewWithT(t)
