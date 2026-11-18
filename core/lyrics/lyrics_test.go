@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -824,87 +823,116 @@ func TestLyricsVariants(t *testing.T) {
 	})
 
 	t.Run("concurrent detailed lookups share one call but do not retain it", func(t *testing.T) {
-		g := NewWithT(t)
-		conf.Update(func(c *conf.Options) { c.LyricsPriority = "Shared" })
-		var calls atomic.Int32
-		loader := variantPluginLoader{"Shared": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
-			calls.Add(1)
-			time.Sleep(25 * time.Millisecond)
-			return remote, nil
-		})}
-		svc := lyrics.NewLyrics(nil, loader)
-		start := make(chan struct{})
-		var wg sync.WaitGroup
-		for range 2 {
-			wg.Go(func() {
-				<-start
-				list, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(list).To(HaveLen(1))
-			})
-		}
-		close(start)
-		wg.Wait()
-		g.Expect(calls.Load()).To(Equal(int32(1)))
+		synctest.Test(t, func(t *testing.T) {
+			g := NewWithT(t)
+			conf.Update(func(c *conf.Options) { c.LyricsPriority = "Shared" })
+			started := make(chan struct{})
+			release := make(chan struct{})
+			var calls atomic.Int32
+			loader := variantPluginLoader{"Shared": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+				if calls.Add(1) == 1 {
+					close(started)
+				}
+				<-release
+				return remote, nil
+			})}
+			svc := lyrics.NewLyrics(nil, loader)
 
-		_, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
-		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(calls.Load()).To(Equal(int32(2)))
+			type lookupResult struct {
+				list model.LyricList
+				err  error
+			}
+			results := make(chan lookupResult, 2)
+			for range 2 {
+				go func() {
+					list, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
+					results <- lookupResult{list: list, err: err}
+				}()
+			}
+			<-started
+			synctest.Wait()
+			g.Expect(calls.Load()).To(Equal(int32(1)), "both callers must join one flight")
+
+			close(release)
+			synctest.Wait()
+			for range 2 {
+				select {
+				case result := <-results:
+					g.Expect(result.err).NotTo(HaveOccurred())
+					g.Expect(result.list).To(HaveLen(1))
+				default:
+					t.Fatal("shared lookup did not deliver both results")
+				}
+			}
+
+			// The load was shared but not retained: a later caller loads again.
+			_, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(calls.Load()).To(Equal(int32(2)))
+		})
 	})
 
 	t.Run("a canceled detailed caller stops waiting without aborting an active caller", func(t *testing.T) {
-		g := NewWithT(t)
-		conf.Update(func(c *conf.Options) { c.LyricsPriority = "Shared" })
-		started := make(chan struct{})
-		release := make(chan struct{})
-		var calls atomic.Int32
-		loader := variantPluginLoader{"Shared": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
-			if calls.Add(1) == 1 {
-				close(started)
+		synctest.Test(t, func(t *testing.T) {
+			g := NewWithT(t)
+			conf.Update(func(c *conf.Options) { c.LyricsPriority = "Shared" })
+			started := make(chan struct{})
+			release := make(chan struct{})
+			var calls atomic.Int32
+			loader := variantPluginLoader{"Shared": variantProvider(func(context.Context, *model.MediaFile) (model.LyricList, error) {
+				if calls.Add(1) == 1 {
+					close(started)
+				}
 				<-release
+				return remote, nil
+			})}
+			svc := lyrics.NewLyrics(nil, loader)
+
+			type lookupResult struct {
+				list model.LyricList
+				err  error
 			}
-			return remote, nil
-		})}
-		svc := lyrics.NewLyrics(nil, loader)
+			canceledCtx, cancel := context.WithCancel(t.Context())
+			canceledResult := make(chan error, 1)
+			go func() {
+				_, err := svc.GetLyricsVariants(canceledCtx, &model.MediaFile{}, false)
+				canceledResult <- err
+			}()
+			<-started
 
-		type lookupResult struct {
-			list model.LyricList
-			err  error
-		}
-		canceledCtx, cancel := context.WithCancel(t.Context())
-		canceledResult := make(chan error, 1)
-		go func() {
-			_, err := svc.GetLyricsVariants(canceledCtx, &model.MediaFile{}, false)
-			canceledResult <- err
-		}()
-		<-started
+			activeResult := make(chan lookupResult, 1)
+			go func() {
+				list, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
+				activeResult <- lookupResult{list: list, err: err}
+			}()
+			synctest.Wait()
+			g.Expect(calls.Load()).To(Equal(int32(1)), "active caller must join the leader's flight")
 
-		activeResult := make(chan lookupResult, 1)
-		go func() {
-			list, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
-			activeResult <- lookupResult{list: list, err: err}
-		}()
-		// Let the active caller join the in-flight load before releasing the leader.
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-		select {
-		case err := <-canceledResult:
-			g.Expect(errors.Is(err, context.Canceled)).To(BeTrue(), "canceled caller error: %v", err)
-		case <-time.After(time.Second):
+			cancel()
+			synctest.Wait()
+			select {
+			case err := <-canceledResult:
+				g.Expect(errors.Is(err, context.Canceled)).To(BeTrue(), "canceled caller error: %v", err)
+			default:
+				t.Fatal("canceled caller did not stop waiting promptly")
+			}
+
 			close(release)
-			t.Fatal("canceled caller did not stop waiting promptly")
-		}
-		close(release)
+			synctest.Wait()
+			select {
+			case active := <-activeResult:
+				g.Expect(active.err).NotTo(HaveOccurred())
+				g.Expect(active.list).To(HaveLen(1))
+			default:
+				t.Fatal("active caller did not receive the shared result")
+			}
+			g.Expect(calls.Load()).To(Equal(int32(1)))
 
-		active := <-activeResult
-		g.Expect(active.err).NotTo(HaveOccurred())
-		g.Expect(active.list).To(HaveLen(1))
-		g.Expect(calls.Load()).To(Equal(int32(1)))
-
-		// The load was shared but not retained: a later caller loads again.
-		_, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
-		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(calls.Load()).To(Equal(int32(2)))
+			// The load was shared but not retained: a later caller loads again.
+			_, err := svc.GetLyricsVariants(t.Context(), &model.MediaFile{}, false)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(calls.Load()).To(Equal(int32(2)))
+		})
 	})
 
 	t.Run("concurrent discovery preserves priority and isolates failures", func(t *testing.T) {
