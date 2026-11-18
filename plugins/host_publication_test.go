@@ -323,13 +323,17 @@ func TestAwaitTailRefreshKeepsAdmissionUntilReleased(t *testing.T) {
 	require.NoError(t, service.commitPublication(t.Context(), track,
 		testAggregateCommit(t, "generation-1", refresh.Token, track, true, 0)))
 
-	// The foreground committed but a tail still owns the write slot.
 	sweepRequest, err := json.Marshal(publicationAdmissionRequest{
 		Version: publicationVersion, Action: "admit", RequestID: "sweep",
 		Generation: "generation-1", Track: track, Scope: "scope", Kind: "sweep",
 	})
 	require.NoError(t, err)
 	require.Error(t, service.admitPublication(t.Context(), track, sweepRequest))
+
+	// The tail commits under the same token and moves the admission to
+	// committed before the terminal release.
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", refresh.Token, track, false, 0)))
 
 	release, err := json.Marshal(publicationAdmissionRequest{
 		Version: publicationVersion, Action: "release", Generation: "generation-1",
@@ -338,4 +342,67 @@ func TestAwaitTailRefreshKeepsAdmissionUntilReleased(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, service.admitPublication(t.Context(), track, release))
 	require.NoError(t, service.admitPublication(t.Context(), track, sweepRequest))
+}
+
+func TestReloadRetiresOldGenerationAdmissions(t *testing.T) {
+	folder := t.TempDir()
+	track := "track-1"
+	service := newPublicationTestService(t, folder, "generation-1")
+	refresh := admitTestPublication(t, service, "generation-1", track, "refresh", "refresh")
+	require.True(t, refresh.Accepted)
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", refresh.Token, track, true, 0)))
+
+	// A reload mints a new generation. The awaiting tail's admission must not
+	// keep blocking foreground writers, and its token must not publish a
+	// snapshot as the new generation.
+	reloaded := newPublicationTestService(t, folder, "generation-2")
+	classic := admitTestPublication(t, reloaded, "generation-2", track, "classic", "classic")
+	require.True(t, classic.Accepted, "an old-generation admission blocked the reloaded host")
+	require.Error(t, reloaded.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-2", refresh.Token, track, false, 0)))
+}
+
+func TestCommitRejectsAdmissionFromAnotherGeneration(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	admission := admitTestPublication(t, service, "generation-1", track, "classic", "call")
+	require.True(t, admission.Accepted)
+	// Simulate a row that survived without being retired: the admission's
+	// generation must still match the batch generation in the same transaction.
+	_, err := service.db.ExecContext(t.Context(),
+		`UPDATE plugin_publication_admissions SET generation='other-generation' WHERE track_key=?`, track)
+	require.NoError(t, err)
+	require.Error(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", admission.Token, track, false, 0)))
+}
+
+func TestReleasedAdmissionTokenCannotCommit(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	admission := admitTestPublication(t, service, "generation-1", track, "classic", "call")
+	require.True(t, admission.Accepted)
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", admission.Token, track, false, 0)))
+
+	release, err := json.Marshal(publicationAdmissionRequest{
+		Version: publicationVersion, Action: "release", Generation: "generation-1",
+		Track: track, Token: admission.Token,
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.admitPublication(t.Context(), track, release))
+	require.Error(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", admission.Token, track, false, 0)))
+}
+
+func TestCommittedForegroundDoesNotBlockSweeps(t *testing.T) {
+	service := newPublicationTestService(t, t.TempDir(), "generation-1")
+	track := "track-1"
+	classic := admitTestPublication(t, service, "generation-1", track, "classic", "classic")
+	require.True(t, classic.Accepted)
+	require.NoError(t, service.commitPublication(t.Context(), track,
+		testAggregateCommit(t, "generation-1", classic.Token, track, false, 0)))
+
+	sweep := admitTestPublication(t, service, "generation-1", track, "sweep", "sweep")
+	require.True(t, sweep.Accepted, "a committed foreground admission blocked the sweep")
 }

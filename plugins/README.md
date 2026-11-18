@@ -626,7 +626,12 @@ generation, admission and state records.
   (`admit`, `resume` or `release`) and read the host-minted token. An old host
   echoes the request without `handled:true`.
 - `@navidrome/publication/commit:<track>`: submit `{generation, token, track,
-  scope, revision, snapshotDigest, complete, writes}`. `snapshotDigest` is
+  scope, revision, snapshotDigest, snapshotExpiresAt, complete, awaitTail,
+  writes}`. `snapshotExpiresAt` is an optional absolute Unix-seconds deadline
+  for every reused cached dependency that fed the snapshot; the host bounds
+  the state claim by it as well as by the writes. `awaitTail` keeps the
+  admission active after the foreground commit so a deferred tail can resume
+  it; the tail's terminal task releases it. `snapshotDigest` is
   SHA-256 over each write's `key`, NUL, `value`, NUL in batch order, then the
   track key and one `0`/`1` completion byte; `revision` is the first 16 bytes
   (lowercase hex) of SHA-256 over the literal
@@ -636,8 +641,12 @@ generation, admission and state records.
   in the same transaction as every write, stores the bounded revision and
   completion record, and rolls the whole batch back on quota, size, TTL or
   scope failure.
-- `@navidrome/publication/state:<track>`: read the committed revision and
-  completion. `@navidrome/publication/active` exposes the current generation.
+- `@navidrome/publication/state:<track>`: read the committed `generation`,
+  `scope`, `revision` and completion. Rows from a different live generation
+  are not returned. `@navidrome/publication/active` exposes the current
+  generation. Admissions are generation-bound: a reload retires every
+  admission minted by the old generation, so stale tokens cannot commit and
+  active tails cannot block the reloaded host.
 
 The host admits a refresh before the plugin is called so an older sweep can no
 longer publish even before the refresh commits. A task continuation carries

@@ -163,14 +163,29 @@ func isPublicationKey(key string) bool {
 }
 
 // seedGeneration makes the new host generation authoritative before the
-// reloaded plugin can run.
+// reloaded plugin can run. Admissions minted by an older generation are
+// retired in the same step: their tokens can no longer commit, and leaving a
+// row active would block foreground writers for the full admission TTL.
 func (s *kvstoreServiceImpl) seedGeneration(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO plugin_publication_generation (id, generation, updated_at)
 		VALUES (1, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET generation = excluded.generation, updated_at = CURRENT_TIMESTAMP
-	`, s.generation)
-	return err
+	`, s.generation); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE plugin_publication_admissions SET state='released', expires_at=datetime('now')
+		WHERE generation != ?
+	`, s.generation); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *kvstoreServiceImpl) currentGeneration(ctx context.Context) (string, error) {
@@ -244,7 +259,7 @@ func (s *kvstoreServiceImpl) admitPublication(ctx context.Context, track string,
 		}
 		return nil
 	case "admit":
-		if err := admissionPolicy(request.Kind, current, exists); err != nil {
+		if err := admissionPolicy(request.Kind, current, exists, generation); err != nil {
 			return err
 		}
 		return s.storeAdmission(ctx, track, generation, request)
@@ -263,14 +278,15 @@ func (s *kvstoreServiceImpl) releaseAdmission(ctx context.Context, track string,
 // admissionPolicy is single-writer: refresh supersedes everything; ordinary
 // foreground work cannot supersede an active refresh/tail; sweeps cannot
 // supersede an active foreground writer.
-func admissionPolicy(kind string, current publicationAdmission, exists bool) error {
-	if !exists || !current.Valid || kind == "refresh" {
+func admissionPolicy(kind string, current publicationAdmission, exists bool, generation string) error {
+	if !exists || !current.Valid || current.Generation != generation || kind == "refresh" {
 		return nil
 	}
 	if (current.Kind == "refresh" || current.Kind == "tail") && current.State == "active" {
 		return fmt.Errorf("%w: refresh active", errPublicationRejected)
 	}
-	if (kind == "sweep" || kind == "tail") && (current.Kind == "classic" || current.Kind == "normal" || current.Kind == "original") {
+	if (kind == "sweep" || kind == "tail") && current.State == "active" &&
+		(current.Kind == "classic" || current.Kind == "normal" || current.Kind == "original") {
 		return fmt.Errorf("%w: foreground active", errPublicationRejected)
 	}
 	return nil
@@ -430,19 +446,20 @@ func (s *kvstoreServiceImpl) applyCommitTx(ctx context.Context, tx *sql.Tx, trac
 	if generation == "" || generation != batch.Generation {
 		return fmt.Errorf("%w: generation changed", errPublicationRejected)
 	}
-	var token, state, scope string
+	var admissionGeneration, token, state, scope string
 	var valid int
 	err = tx.QueryRowContext(ctx, `
-		SELECT token, state, scope, CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END
+		SELECT generation, token, state, scope, CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END
 		FROM plugin_publication_admissions WHERE track_key = ?
-	`, track).Scan(&token, &state, &scope, &valid)
+	`, track).Scan(&admissionGeneration, &token, &state, &scope, &valid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: no admission", errPublicationRejected)
 	}
 	if err != nil {
 		return err
 	}
-	if token != batch.Token || (scope != publicationHostScope && scope != batch.Scope) || state == "released" || valid != 1 {
+	if admissionGeneration != batch.Generation || token != batch.Token ||
+		(scope != publicationHostScope && scope != batch.Scope) || state == "released" || valid != 1 {
 		return fmt.Errorf("%w: stale admission", errPublicationRejected)
 	}
 	if err := s.checkCommitQuota(ctx, tx, batch.Writes); err != nil {
