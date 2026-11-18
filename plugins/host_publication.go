@@ -126,6 +126,23 @@ func randomPublicationToken(bytes int) string {
 	return hex.EncodeToString(value)
 }
 
+func publicationDigest(writes []publicationWrite, track string, complete bool) string {
+	hash := sha256.New()
+	for _, write := range writes {
+		hash.Write([]byte(write.Key))
+		hash.Write([]byte{0})
+		hash.Write(write.Value)
+		hash.Write([]byte{0})
+	}
+	hash.Write([]byte(track))
+	if complete {
+		hash.Write([]byte{1})
+	} else {
+		hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
 func publicationRevision(generation, track, digest string) string {
 	sum := sha256.Sum256([]byte("navidrome-better-lyrics/publication/v1\x00" + generation + "\x00" + track + "\x00" + digest))
 	return hex.EncodeToString(sum[:16])
@@ -368,6 +385,9 @@ func validateCommitBatch(batch publicationCommitRequest, track string) error {
 	}
 	if total > maxPublicationBytes {
 		return fmt.Errorf("%w: batch too large", errPublicationRejected)
+	}
+	if batch.SnapshotDigest != publicationDigest(batch.Writes, track, batch.Complete) {
+		return fmt.Errorf("%w: snapshot digest mismatch", errPublicationRejected)
 	}
 	if got := publicationRevision(batch.Generation, track, batch.SnapshotDigest); got != batch.Revision {
 		return fmt.Errorf("%w: revision mismatch", errPublicationRejected)

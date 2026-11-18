@@ -35,7 +35,7 @@ func admitTestPublication(t *testing.T, service *kvstoreServiceImpl, generation,
 	return response
 }
 
-func publicationDigestForTest(writes []publicationWrite, body string, complete bool) string {
+func publicationDigestForTest(writes []publicationWrite, track string, complete bool) string {
 	hash := sha256.New()
 	for _, write := range writes {
 		hash.Write([]byte(write.Key))
@@ -43,7 +43,7 @@ func publicationDigestForTest(writes []publicationWrite, body string, complete b
 		hash.Write(write.Value)
 		hash.Write([]byte{0})
 	}
-	hash.Write([]byte(body))
+	hash.Write([]byte(track))
 	if complete {
 		hash.Write([]byte{1})
 	} else {
@@ -55,7 +55,7 @@ func publicationDigestForTest(writes []publicationWrite, body string, complete b
 func testCommit(t *testing.T, generation, token, track string) []byte {
 	t.Helper()
 	write := publicationWrite{Key: "lyrics:v5:source:lrclib:" + track, Value: []byte("snapshot"), TTL: 300}
-	digest := publicationDigestForTest([]publicationWrite{write}, "body", true)
+	digest := publicationDigestForTest([]publicationWrite{write}, track, true)
 	batch := publicationCommitRequest{
 		Version: publicationVersion, Generation: generation, Token: token, Track: track,
 		Scope: "scope", Revision: publicationRevision(generation, track, digest),
@@ -155,7 +155,7 @@ func TestPublicationRejectsDuplicateWriteKeys(t *testing.T) {
 	admission := admitTestPublication(t, service, "generation-1", track, "classic", "call")
 	require.True(t, admission.Accepted)
 	write := publicationWrite{Key: "lyrics:v5:source:lrclib:" + track, Value: []byte("snapshot"), TTL: 300}
-	digest := publicationDigestForTest([]publicationWrite{write, write}, "body", true)
+	digest := publicationDigestForTest([]publicationWrite{write, write}, track, true)
 	batch := publicationCommitRequest{
 		Version: publicationVersion, Generation: "generation-1", Token: admission.Token, Track: track,
 		Scope: "scope", Revision: publicationRevision("generation-1", track, digest),
