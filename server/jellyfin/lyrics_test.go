@@ -51,6 +51,10 @@ func (f *fakeLyricsService) GetLyricsVariantsResult(ctx context.Context, mf *mod
 	return model.LyricsResult{}, nil
 }
 
+func (f *fakeLyricsService) RefreshLyricsVariantsResult(ctx context.Context, mf *model.MediaFile, allSources bool) (model.LyricsResult, error) {
+	return f.GetLyricsVariantsResult(ctx, mf, allSources)
+}
+
 func (f *fakeLyricsService) ListLyricsVariantsResult(ctx context.Context, mf *model.MediaFile) ([]model.LyricsVariant, []model.LyricsEvidence, error) {
 	return nil, nil, nil
 }

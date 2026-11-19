@@ -33,16 +33,18 @@ const cleanupInterval = 1 * time.Hour
 // kvstoreServiceImpl implements the host.KVStoreService interface.
 // Each plugin gets its own SQLite database for isolation.
 type kvstoreServiceImpl struct {
-	pluginName string
-	db         *sql.DB
-	maxSize    int64
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	pluginName    string
+	db            *sql.DB
+	maxSize       int64
+	generation    string
+	publicationMu sync.Mutex
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
 }
 
 // newKVStoreService creates a new kvstoreServiceImpl instance with its own SQLite database.
 // The provided context controls the lifetime of the background cleanup goroutine.
-func newKVStoreService(ctx context.Context, pluginName string, perm *KVStorePermission) (*kvstoreServiceImpl, error) {
+func newKVStoreService(ctx context.Context, pluginName string, perm *KVStorePermission, generations ...string) (*kvstoreServiceImpl, error) {
 	// Parse max size from permission, default to 1MB
 	maxSize := int64(defaultMaxKVStoreSize)
 	if perm != nil && perm.MaxSize != nil && *perm.MaxSize != "" {
@@ -77,12 +79,21 @@ func newKVStoreService(ctx context.Context, pluginName string, perm *KVStorePerm
 
 	log.Debug("Initialized plugin kvstore", "plugin", pluginName, "path", dbPath, "maxSize", humanize.Bytes(uint64(maxSize)))
 
+	generation := randomPublicationToken(16)
+	if len(generations) > 0 && generations[0] != "" {
+		generation = generations[0]
+	}
 	cleanupCtx, cancel := context.WithCancel(ctx)
 	svc := &kvstoreServiceImpl{
 		pluginName: pluginName,
 		db:         db,
 		maxSize:    maxSize,
+		generation: generation,
 		cancel:     cancel,
+	}
+	if err := svc.seedGeneration(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("seeding publication generation: %w", err)
 	}
 	svc.wg.Add(1)
 	go svc.cleanupLoop(cleanupCtx)
@@ -102,6 +113,30 @@ func createKVStoreSchema(db *sql.DB) error {
 		)`,
 		`ALTER TABLE kvstore ADD COLUMN expires_at DATETIME DEFAULT NULL`,
 		`CREATE INDEX idx_kvstore_expires_at ON kvstore(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS plugin_publication_generation (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			generation TEXT NOT NULL,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS plugin_publication_admissions (
+			track_key TEXT PRIMARY KEY NOT NULL,
+			generation TEXT NOT NULL,
+			token TEXT NOT NULL,
+			request_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			scope TEXT NOT NULL,
+			state TEXT NOT NULL,
+			expires_at DATETIME NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS plugin_publication_state (
+			track_key TEXT PRIMARY KEY NOT NULL,
+			scope TEXT NOT NULL,
+			revision TEXT NOT NULL,
+			snapshot_digest TEXT NOT NULL,
+			complete INTEGER NOT NULL,
+			expires_at DATETIME NOT NULL
+		)`,
+		`ALTER TABLE plugin_publication_state ADD COLUMN generation TEXT NOT NULL DEFAULT ''`,
 	})
 }
 
@@ -181,11 +216,17 @@ func (s *kvstoreServiceImpl) setValue(ctx context.Context, key string, value []b
 
 // Set stores a byte value with the given key.
 func (s *kvstoreServiceImpl) Set(ctx context.Context, key string, value []byte) error {
+	if isPublicationKey(key) {
+		return s.handlePublicationSet(ctx, key, value, 0)
+	}
 	return s.setValue(ctx, key, value, 0)
 }
 
 // SetWithTTL stores a byte value with the given key and a time-to-live.
 func (s *kvstoreServiceImpl) SetWithTTL(ctx context.Context, key string, value []byte, ttlSeconds int64) error {
+	if isPublicationKey(key) {
+		return s.handlePublicationSet(ctx, key, value, ttlSeconds)
+	}
 	if ttlSeconds <= 0 {
 		return errors.New("ttlSeconds must be greater than 0")
 	}
@@ -194,6 +235,9 @@ func (s *kvstoreServiceImpl) SetWithTTL(ctx context.Context, key string, value [
 
 // Get retrieves a byte value from storage.
 func (s *kvstoreServiceImpl) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	if isPublicationKey(key) {
+		return s.handlePublicationGet(ctx, key)
+	}
 	var value []byte
 	err := s.db.QueryRowContext(ctx, `SELECT value FROM kvstore WHERE key = ? AND `+notExpiredFilter, key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -209,6 +253,9 @@ func (s *kvstoreServiceImpl) Get(ctx context.Context, key string) ([]byte, bool,
 
 // Delete removes a value from storage.
 func (s *kvstoreServiceImpl) Delete(ctx context.Context, key string) error {
+	if isPublicationKey(key) {
+		return fmt.Errorf("%w: reserved publication state", errPublicationRejected)
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM kvstore WHERE key = ?`, key)
 	if err != nil {
 		return fmt.Errorf("deleting value: %w", err)
@@ -220,6 +267,10 @@ func (s *kvstoreServiceImpl) Delete(ctx context.Context, key string) error {
 
 // Has checks if a key exists in storage.
 func (s *kvstoreServiceImpl) Has(ctx context.Context, key string) (bool, error) {
+	if isPublicationKey(key) {
+		_, exists, err := s.Get(ctx, key)
+		return exists, err
+	}
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM kvstore WHERE key = ? AND `+notExpiredFilter, key).Scan(&count)
 	if err != nil {
@@ -276,6 +327,9 @@ func (s *kvstoreServiceImpl) GetStorageUsed(ctx context.Context) (int64, error) 
 
 // DeleteByPrefix removes all keys matching the given prefix.
 func (s *kvstoreServiceImpl) DeleteByPrefix(ctx context.Context, prefix string) (int64, error) {
+	if isPublicationKey(prefix) || (prefix != "" && strings.HasPrefix(publicationPrefix, prefix)) {
+		return 0, fmt.Errorf("%w: reserved publication state", errPublicationRejected)
+	}
 	if prefix == "" {
 		return 0, errors.New("prefix cannot be empty")
 	}
@@ -301,6 +355,13 @@ func (s *kvstoreServiceImpl) GetMany(ctx context.Context, keys []string) (map[st
 	if len(keys) == 0 {
 		return map[string][]byte{}, nil
 	}
+	var publicationKeys []string
+	for _, key := range keys {
+		if isPublicationKey(key) {
+			publicationKeys = append(publicationKeys, key)
+		}
+	}
+	keys = slices.DeleteFunc(slices.Clone(keys), isPublicationKey)
 
 	const batchSize = 200
 	result := make(map[string][]byte)
@@ -334,6 +395,13 @@ func (s *kvstoreServiceImpl) GetMany(ctx context.Context, keys []string) (map[st
 		rows.Close()
 	}
 
+	for _, key := range publicationKeys {
+		if value, exists, err := s.Get(ctx, key); err != nil {
+			return nil, err
+		} else if exists {
+			result[key] = value
+		}
+	}
 	log.Trace(ctx, "KVStore.GetMany", "plugin", s.pluginName, "requested", len(keys), "found", len(result))
 	return result, nil
 }
@@ -360,6 +428,12 @@ func (s *kvstoreServiceImpl) cleanupExpired(ctx context.Context) {
 	if err != nil {
 		log.Error(ctx, "KVStore cleanup: failed to delete expired keys", "plugin", s.pluginName, err)
 		return
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM plugin_publication_admissions WHERE expires_at < datetime('now')`); err != nil {
+		log.Error(ctx, "KVStore cleanup: failed to delete expired admissions", "plugin", s.pluginName, err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM plugin_publication_state WHERE expires_at < datetime('now')`); err != nil {
+		log.Error(ctx, "KVStore cleanup: failed to delete expired publication state", "plugin", s.pluginName, err)
 	}
 	if count, err := result.RowsAffected(); err == nil && count > 0 {
 		log.Debug("KVStore cleanup completed", "plugin", s.pluginName, "deletedKeys", count)

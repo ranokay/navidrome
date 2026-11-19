@@ -138,12 +138,21 @@ func (api *Router) GetLyricsBySongId(r *http.Request) (*responses.Subsonic, erro
 
 	enhanced, _ := req.Params(r).Bool("enhanced")
 	allSources, _ := req.Params(r).Bool("allSources")
+	refresh, _ := req.Params(r).Bool("refresh")
+	if refresh && !enhanced {
+		return nil, newError(responses.ErrorGeneric, "refresh requires enhanced lyrics")
+	}
 	var structuredLyrics model.LyricList
 	var evidence []model.LyricsEvidence
+	var discovery model.LyricsDiscovery
 	if enhanced {
 		var result model.LyricsResult
-		result, err = api.lyrics.GetLyricsVariantsResult(r.Context(), mediaFile, allSources)
-		structuredLyrics, evidence = result.Lyrics, result.Evidence
+		if refresh {
+			result, err = api.lyrics.RefreshLyricsVariantsResult(r.Context(), mediaFile, allSources)
+		} else {
+			result, err = api.lyrics.GetLyricsVariantsResult(r.Context(), mediaFile, allSources)
+		}
+		structuredLyrics, evidence, discovery = result.Lyrics, result.Evidence, result.Discovery
 	} else {
 		structuredLyrics, err = api.lyrics.GetLyrics(r.Context(), mediaFile)
 	}
@@ -162,6 +171,8 @@ func (api *Router) GetLyricsBySongId(r *http.Request) (*responses.Subsonic, erro
 	response.LyricsList.SourcesIncomplete = enhanced && err != nil
 	if enhanced {
 		response.LyricsList.RetryAfterSeconds = lyricsRetryAfterSeconds(err)
+		response.LyricsList.DiscoveryRevision = discovery.Revision
+		response.LyricsList.DiscoveryComplete = discovery.Complete
 	}
 
 	return response, nil

@@ -21,6 +21,8 @@ type fakeOriginalsLyrics struct {
 	variants     []model.LyricsVariant
 	original     model.LyricsOriginal
 	originalErr  error
+	result       model.LyricsResult
+	refreshCalls int
 	lastPlugin   string
 	lastIdentity model.LyricsVariantIdentity
 }
@@ -36,7 +38,12 @@ func (f *fakeOriginalsLyrics) GetLyricsVariants(context.Context, *model.MediaFil
 }
 
 func (f *fakeOriginalsLyrics) GetLyricsVariantsResult(context.Context, *model.MediaFile, bool) (model.LyricsResult, error) {
-	return model.LyricsResult{}, nil
+	return f.result, nil
+}
+
+func (f *fakeOriginalsLyrics) RefreshLyricsVariantsResult(ctx context.Context, mf *model.MediaFile, allSources bool) (model.LyricsResult, error) {
+	f.refreshCalls++
+	return f.GetLyricsVariantsResult(ctx, mf, allSources)
 }
 
 func (f *fakeOriginalsLyrics) GetLyricsByArtistTitle(context.Context, string, string) (model.LyricList, error) {
@@ -173,5 +180,23 @@ var _ = Describe("Lyrics originals routes", func() {
 		name := lyricsOriginalFilename(&model.MediaFile{Title: `A/B: "C"`, Artist: "Artist"}, ".ttml")
 		Expect(strings.ContainsAny(name, `/\:"`)).To(BeFalse())
 		Expect(name).To(HaveSuffix(".ttml"))
+	})
+})
+
+var _ = Describe("Lyrics discovery route", func() {
+	It("routes refresh and exposes the committed discovery fields", func() {
+		service := &fakeOriginalsLyrics{result: model.LyricsResult{Discovery: model.LyricsDiscovery{Revision: "revision-1", Complete: true}}}
+		repo := &mockedMediaFile{MockMediaFileRepo: tests.MockMediaFileRepo{}}
+		repo.SetData(model.MediaFiles{{ID: "1", Title: "Song", Artist: "Artist", Duration: 200}})
+		ds := &tests.MockDataStore{MockedMediaFile: repo}
+		router := New(ds, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, service, nil, nil)
+		response, err := router.GetLyricsBySongId(newGetRequest("id=1&enhanced=true&refresh=true"))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(service.refreshCalls).To(Equal(1))
+		Expect(response.LyricsList.DiscoveryRevision).To(Equal("revision-1"))
+		Expect(response.LyricsList.DiscoveryComplete).To(BeTrue())
+
+		_, err = router.GetLyricsBySongId(newGetRequest("id=1&refresh=true"))
+		Expect(err).To(HaveOccurred())
 	})
 })

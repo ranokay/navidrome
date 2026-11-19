@@ -615,6 +615,74 @@ usage, err := host.KVStoreGetStorageUsed()
 fmt.Printf("Using %d bytes\n", usage)
 ```
 
+**Publication namespace (host-owned):**
+
+`@navidrome/publication/` is reserved for the host's lyric discovery
+publication contract. Ordinary `kvstore_set`, `setwithttl`, `delete` and
+`deletebyprefix` calls cannot modify it; `kvstore_get` reads the host-owned
+generation, admission and state records.
+
+- `@navidrome/publication/admission:<track>`: set an admission request
+  (`admit`, `resume` or `release`) and read the host-minted token. An old host
+  echoes the request without `handled:true`.
+- `@navidrome/publication/commit:<track>`: submit `{generation, token, track,
+  scope, revision, snapshotDigest, snapshotExpiresAt, complete, awaitTail,
+  writes}`. `snapshotExpiresAt` is an optional absolute Unix-seconds deadline
+  for every reused cached dependency that fed the snapshot; the host bounds
+  the state claim by it as well as by the writes. `awaitTail` keeps the
+  admission active after the foreground commit so a deferred tail can resume
+  it; the tail's terminal task releases it. `snapshotDigest` is
+  SHA-256 over each write's `key`, NUL, `value`, NUL in batch order, then the
+  track key and one `0`/`1` completion byte; `revision` is the first 16 bytes
+  (lowercase hex) of SHA-256 over the literal
+  `navidrome-better-lyrics/publication/v1`, NUL, generation, NUL, track, NUL and
+  the digest. The host
+  recomputes the digest, checks the live generation and exact admission token
+  in the same transaction as every write, stores the bounded revision and
+  completion record, and rolls the whole batch back on quota, size, TTL or
+  scope failure.
+- `@navidrome/publication/state:<track>`: read the committed `generation`,
+  `scope`, `revision`, completion and `expiresAt` (absolute Unix seconds, the
+  completion record's expiry, not the expiry of the published rows).
+  Rows from a different live generation are not returned. `@navidrome/publication/active` exposes the current
+  generation and, when true, the `controlMerge` capability that confirms
+  support for the control operations below. Admissions are generation-bound: a reload retires every
+  admission minted by the old generation, so stale tokens cannot commit and
+  active tails cannot block the reloaded host. State is process-scoped: a
+  reload mints a new generation, and old rows are ignored rather than reused.
+- `@navidrome/publication/control:<key>`: atomically raise a normal scalar
+  `key` to an integer `{value, ttl}` maximum and extend its TTL. `value` must
+  be positive; `ttl` is in seconds, must be positive and at most 24 hours, and
+  must cover the value's intended lifetime. Merges are subject to the plugin
+  storage quota. Cooldown observations use this form; the target must not be
+  reserved, `lyrics:v5:`, `sweep-done:` or `source-failure-reset:v1:`, and a
+  permanent scalar target stays permanent. Only targets written exclusively
+  through this path are monotonic. Read the target key for the merged value;
+  for a scalar merge a missing, expired or non-integer target starts from zero.
+  The same namespace accepts `{operation:"failure", failures, until, updatedAt,
+  ttl}` and `{operation:"reset", resetAt, ttl}` only for the
+  `source-failure:v1:<source>` row. Both require positive timestamps, and a
+  failure also requires positive `failures` and `until`; an unknown operation
+  or a scalar merge to that prefix is rejected. Failures older than the row's
+  recovery timestamp are ignored, and a recovery clears only failures that
+  predate it. Reducer rows and the derived `source-failure-reset:v1:<source>`
+  key are TTL-bound, not permanent. The plugin reads the complete row and the
+  legacy reset key.
+- A terminal commit consumes its admission: `resume` and `commit` require the
+  admission state to be `active`. An `awaitTail` commit keeps it active for the
+  tail. After a terminal commit the token cannot be replayed; use
+  `state:<track>` to confirm a response whose commit reply was lost.
+
+The host admits a refresh before the plugin is called so an older sweep can no
+longer publish even before the refresh commits. A task continuation carries
+its original generation and token; it must resume that admission rather than
+re-read the active key. Batches are limited to 64 writes, 16 MiB total, 1 MiB
+per value, allowed `lyrics:v5:`/`sweep-done:` prefixes containing the admitted
+track key, and the host's configured quota (the shipped lyrics plugin declares 32 MB) while
+leaving 1 MiB of control headroom where the quota permits. Cooldowns, salts, immutable originals
+and task markers remain separate control writes; capable hosts merge cooldown
+scalars and reduce source-failure rows through the `control:` namespace.
+
 ### Storage
 
 A private read-write directory, mounted into the sandbox at `/storage` and backed by `${DataFolder}/plugins/${pluginID}/storage`. Survives server restarts. Use it for data that doesn't fit a key-value store: caches, downloaded files, generated indexes.

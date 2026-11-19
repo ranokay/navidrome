@@ -2,6 +2,8 @@ package plugins
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,10 +17,11 @@ import (
 const CapabilityLyrics Capability = "Lyrics"
 
 const (
-	FuncLyricsGetLyrics   = "nd_lyrics_get_lyrics"
-	FuncLyricsGetLyricsV2 = "nd_lyrics_get_lyrics_v2"
-	FuncLyricsGetVariants = "nd_lyrics_get_variants"
-	FuncLyricsGetOriginal = "nd_lyrics_get_original"
+	FuncLyricsGetLyrics          = "nd_lyrics_get_lyrics"
+	FuncLyricsGetLyricsPublished = "nd_lyrics_get_lyrics_published"
+	FuncLyricsGetLyricsV2        = "nd_lyrics_get_lyrics_v2"
+	FuncLyricsGetVariants        = "nd_lyrics_get_variants"
+	FuncLyricsGetOriginal        = "nd_lyrics_get_original"
 )
 
 // maxConcurrentLyricsCalls caps in-flight lyrics calls per plugin: clients prefetch
@@ -56,6 +59,163 @@ func (l *LyricsPlugin) GetLyrics(ctx context.Context, mf *model.MediaFile) (mode
 	}
 	defer l.release()
 	return l.getLyricsV1(ctx, mf)
+}
+
+// PublicationGeneration is the live host generation for this plugin instance.
+func (l *LyricsPlugin) PublicationGeneration() string {
+	if l.plugin == nil {
+		return ""
+	}
+	return l.plugin.generation
+}
+
+// StartPublication mints a host-owned admission for one refresh operation.
+func (l *LyricsPlugin) StartPublication(ctx context.Context, mf *model.MediaFile, kind string) (model.LyricsPublication, bool, error) {
+	if l.plugin == nil || l.plugin.publication == nil || l.plugin.generation == "" {
+		return model.LyricsPublication{}, false, nil
+	}
+	trackKey := publicationTrackKey(mf)
+	if trackKey == "" {
+		return model.LyricsPublication{}, false, nil
+	}
+	callID := randomPublicationToken(12)
+	token, err := l.plugin.publication.AdmitHost(ctx, l.plugin.generation, trackKey, kind, callID)
+	if err != nil {
+		return model.LyricsPublication{}, true, err
+	}
+	return model.LyricsPublication{Generation: l.plugin.generation, Token: token, CallID: callID, Kind: kind}, true, nil
+}
+
+// AbortPublication releases an abandoned refresh admission.
+func (l *LyricsPlugin) AbortPublication(ctx context.Context, mf *model.MediaFile, publication model.LyricsPublication) error {
+	if l.plugin == nil || l.plugin.publication == nil || publication.Generation == "" || publication.Token == "" {
+		return nil
+	}
+	return l.plugin.publication.ReleaseHost(ctx, publication.Generation, publicationTrackKey(mf), publication.Token)
+}
+
+// GetLyricsWithPublication negotiates the optional classic-capable export. It
+// returns supported=false only when the plugin genuinely lacks the export, so a
+// capable host never mistakes a denial for legacy support.
+func (l *LyricsPlugin) GetLyricsWithPublication(ctx context.Context, mf *model.MediaFile, publication model.LyricsPublication) (model.LyricList, model.LyricsDiscovery, bool, error) {
+	if err := l.acquire(ctx); err != nil {
+		return nil, model.LyricsDiscovery{}, false, err
+	}
+	defer l.release()
+	response, err := callPluginFunction[capabilities.GetLyricsPublishedRequest, capabilities.GetLyricsPublishedResponse](
+		ctx, l.plugin, FuncLyricsGetLyricsPublished,
+		capabilities.GetLyricsPublishedRequest{
+			Track: mediaFileToTrackInfo(l.plugin, mf), Publication: capabilityPublication(publication),
+		},
+	)
+	if err != nil {
+		if unsupportedPluginFunction(err) {
+			list, listErr := l.getLyricsV1(ctx, mf)
+			return list, model.LyricsDiscovery{}, false, listErr
+		}
+		return nil, model.LyricsDiscovery{}, true, err
+	}
+	entries := make([]lyricsEntry, 0, len(response.Lyrics))
+	for _, text := range response.Lyrics {
+		entries = append(entries, lyricsEntry{text: text})
+	}
+	return l.parseEntries(ctx, mf, response.Source, entries), modelDiscovery(response.Discovery), true, nil
+}
+
+// GetLyricsDetailedResultWithRefresh is the publication-aware enhanced path.
+func (l *LyricsPlugin) GetLyricsDetailedResultWithRefresh(ctx context.Context, mf *model.MediaFile, publication model.LyricsPublication, refresh bool) (model.LyricsResult, bool, error) {
+	if err := l.acquire(ctx); err != nil {
+		return model.LyricsResult{}, false, err
+	}
+	defer l.release()
+	response, err := callPluginFunction[capabilities.GetLyricsV2Request, capabilities.GetLyricsV2Response](
+		ctx, l.plugin, FuncLyricsGetLyricsV2,
+		capabilities.GetLyricsV2Request{
+			Track: mediaFileToTrackInfo(l.plugin, mf), Refresh: refresh, Publication: capabilityPublication(publication),
+		},
+	)
+	if err != nil {
+		if unsupportedPluginFunction(err) {
+			if result, supported, fallbackErr := l.getLyricsV2(ctx, mf); supported {
+				return result, false, fallbackErr
+			}
+			list, fallbackErr := l.getLyricsV1(ctx, mf)
+			return model.LyricsResult{Lyrics: list}, false, fallbackErr
+		}
+		return model.LyricsResult{}, true, err
+	}
+	entries := make([]lyricsEntry, 0, len(response.Lyrics))
+	for _, text := range response.Lyrics {
+		entries = append(entries, lyricsEntry{
+			text:    capabilities.LyricsText{Lang: text.Lang, Text: text.Text, Source: text.Source},
+			variant: text.Variant,
+			match:   text.Match,
+		})
+	}
+	return model.LyricsResult{
+		Lyrics:    l.parseEntries(ctx, mf, response.Source, entries),
+		Evidence:  modelLyricsEvidence(l.name, response.Evidence),
+		Discovery: modelDiscovery(response.Discovery),
+	}, true, nil
+}
+
+// GetOriginalWithPublication carries live publication metadata into the
+// original refetch path, which can mutate shared source caches.
+func (l *LyricsPlugin) GetOriginalWithPublication(ctx context.Context, mf *model.MediaFile, identity model.LyricsVariantIdentity, publication model.LyricsPublication) (model.LyricsOriginal, bool, error) {
+	if !identity.Valid() {
+		return model.LyricsOriginal{}, true, fmt.Errorf("%w: invalid selection", model.ErrLyricsOriginalUnavailable)
+	}
+	if err := l.acquire(ctx); err != nil {
+		return model.LyricsOriginal{}, true, err
+	}
+	defer l.release()
+	response, err := callPluginFunction[capabilities.GetLyricsOriginalRequest, capabilities.GetLyricsOriginalResponse](
+		ctx, l.plugin, FuncLyricsGetOriginal,
+		capabilities.GetLyricsOriginalRequest{
+			Track: mediaFileToTrackInfo(l.plugin, mf), Identity: capabilityLyricsVariant(identity),
+			Publication: capabilityPublication(publication),
+		},
+	)
+	if err != nil {
+		if unsupportedPluginFunction(err) {
+			return model.LyricsOriginal{}, false, nil
+		}
+		return model.LyricsOriginal{}, true, err
+	}
+	original, err := parseOriginalResponse(response, identity)
+	return original, true, err
+}
+
+func capabilityPublication(publication model.LyricsPublication) *capabilities.Publication {
+	if publication.Generation == "" {
+		return nil
+	}
+	return &capabilities.Publication{
+		Generation: publication.Generation, Token: publication.Token,
+		CallID: publication.CallID, Kind: publication.Kind,
+	}
+}
+
+func modelDiscovery(discovery *capabilities.Discovery) model.LyricsDiscovery {
+	if discovery == nil {
+		return model.LyricsDiscovery{}
+	}
+	return model.LyricsDiscovery{Revision: boundedText(discovery.Revision, 64), Complete: discovery.Complete}
+}
+
+func publicationTrackKey(mf *model.MediaFile) string {
+	if mf == nil {
+		return ""
+	}
+	title := strings.ToLower(strings.TrimSpace(mf.Title))
+	artist := strings.ToLower(strings.TrimSpace(mf.Artist))
+	if title == "" || artist == "" {
+		return ""
+	}
+	album := strings.ToLower(strings.TrimSpace(mf.Album))
+	duration := int64(mf.Duration + 0.5)
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%d", title, artist, album, duration)))
+	return hex.EncodeToString(sum[:])
 }
 
 // GetLyricsDetailed prefers the optional playback-v2 export, which adds every
@@ -176,6 +336,10 @@ func (l *LyricsPlugin) GetOriginal(ctx context.Context, mf *model.MediaFile, ide
 		}
 		return model.LyricsOriginal{}, err
 	}
+	return parseOriginalResponse(response, identity)
+}
+
+func parseOriginalResponse(response capabilities.GetLyricsOriginalResponse, identity model.LyricsVariantIdentity) (model.LyricsOriginal, error) {
 	if !response.Available {
 		reason := strings.TrimSpace(response.UnavailableReason)
 		if reason == "" {

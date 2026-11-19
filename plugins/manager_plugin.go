@@ -26,6 +26,8 @@ type plugin struct {
 	libraries      libraryAccess
 	lyricsSem      chan struct{}   // Caps concurrent lyrics calls (see LyricsPlugin.GetLyrics)
 	fsConfig       wazero.FSConfig // Sandboxed library mounts, nil if no filesystem permission
+	generation     string
+	publication    *kvstoreServiceImpl
 }
 
 // instanceConfig is used by every call site, so all instances get the sandboxed mounts.

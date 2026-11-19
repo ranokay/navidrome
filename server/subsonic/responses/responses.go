@@ -628,6 +628,8 @@ type LyricsList struct {
 	Personal             *LyricsPersonal   `xml:"personal,omitempty" json:"personal,omitempty"`
 	SourcesIncomplete    bool              `xml:"sourcesIncomplete,attr,omitempty" json:"sourcesIncomplete,omitempty"`
 	RetryAfterSeconds    int               `xml:"retryAfterSeconds,attr,omitempty" json:"retryAfterSeconds,omitempty"`
+	DiscoveryRevision    string            `xml:"discoveryRevision,attr,omitempty" json:"discoveryRevision,omitempty"`
+	DiscoveryComplete    bool              `xml:"discoveryComplete,attr,omitempty" json:"discoveryComplete,omitempty"`
 }
 
 // LyricsLocalIdentity is the host-issued address of one selectable embedded
